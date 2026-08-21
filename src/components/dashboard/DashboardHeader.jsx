@@ -25,6 +25,12 @@ export default function DashboardHeader({ onMenuToggle }) {
     if (path.startsWith('/dashboard/posts/') && path.endsWith('/edit')) {
       return 'Edit Post'
     }
+    if (path === '/dashboard/review') {
+      return profile?.role === 'contributor' ? 'Review Feedback' : 'Review Queue'
+    }
+    if (path.startsWith('/dashboard/review/')) {
+      return profile?.role === 'contributor' ? 'Review Feedback' : 'Review Submission'
+    }
     return 'Dashboard Overview'
   }
 

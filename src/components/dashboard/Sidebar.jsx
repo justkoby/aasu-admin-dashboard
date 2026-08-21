@@ -1,6 +1,7 @@
-import React from 'react'
+import React, { useState, useEffect } from 'react'
 import { Link, useLocation } from 'react-router-dom'
 import { useAuth } from '../../context/AuthContext'
+import { supabase } from '../../lib/supabaseClient'
 import {
   LayoutDashboard,
   FileText,
@@ -20,12 +21,38 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
   const { profile } = useAuth()
   const location = useLocation()
   const userRole = profile?.role || 'contributor'
+  const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
+
+  // Number of posts awaiting review — shown as a badge for administrators
+  const [reviewCount, setReviewCount] = useState(0)
+
+  useEffect(() => {
+    if (!isAdminRole) return
+    let isMounted = true
+
+    const fetchReviewCount = async () => {
+      const { count, error } = await supabase
+        .from('posts')
+        .select('id', { count: 'exact', head: true })
+        .eq('status', 'in_review')
+
+      if (!error && isMounted) {
+        setReviewCount(count || 0)
+      }
+    }
+
+    fetchReviewCount()
+    return () => {
+      isMounted = false
+    }
+    // Re-count whenever the user navigates so the badge stays fresh
+  }, [isAdminRole, location.pathname])
 
   // Helper to determine if link is active in routing
   const isActive = (path) => location.pathname === path
 
   // Helper to render sidebar items
-  const renderItem = (label, icon, path, comingNext = false) => {
+  const renderItem = (label, icon, path, comingNext = false, count = 0) => {
     const active = isActive(path)
     
     const content = (
@@ -36,6 +63,9 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         </div>
         {comingNext && !isCollapsed && (
           <span className="coming-soon-badge">Coming next</span>
+        )}
+        {!comingNext && count > 0 && (
+          <span className="review-count-badge" title={`${count} awaiting review`}>{count}</span>
         )}
       </>
     )
@@ -114,16 +144,17 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
       contentItems.push({
         label: 'Review Queue',
         icon: <ClipboardList size={20} className="sidebar-icon" />,
-        path: '/dashboard/review-queue',
-        comingNext: true
+        path: '/dashboard/review',
+        comingNext: false,
+        count: reviewCount
       })
     } else {
       // Contributor role
       contentItems.push({
         label: 'Review Feedback',
         icon: <ClipboardList size={20} className="sidebar-icon" />,
-        path: '/dashboard/feedback',
-        comingNext: true
+        path: '/dashboard/review',
+        comingNext: false
       })
     }
 
@@ -227,7 +258,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
             <span className="sidebar-group-label">{section.label}</span>
             <div className="sidebar-group-links">
               {section.items.map((item) =>
-                renderItem(item.label, item.icon, item.path, item.comingNext)
+                renderItem(item.label, item.icon, item.path, item.comingNext, item.count || 0)
               )}
             </div>
           </div>

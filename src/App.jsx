@@ -7,6 +7,8 @@ import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
 import PostsPage from './pages/PostsPage'
 import PostEditorPage from './pages/PostEditorPage'
+import ReviewQueuePage from './pages/ReviewQueuePage'
+import ReviewPostPage from './pages/ReviewPostPage'
 
 export default function App() {
   return (
@@ -35,6 +37,10 @@ export default function App() {
             <Route path="posts" element={<PostsPage />} />
             <Route path="posts/new" element={<PostEditorPage />} />
             <Route path="posts/:id/edit" element={<PostEditorPage />} />
+
+            {/* Editorial Review Workflow routes */}
+            <Route path="review" element={<ReviewQueuePage />} />
+            <Route path="review/:id" element={<ReviewPostPage />} />
           </Route>
 
           {/* Fallback route - redirect back to dashboard */}

@@ -1,0 +1,605 @@
+/* AASU CMS Editorial Review Module Stylesheet */
+
+/* ==========================================================================
+   Page Header
+   ========================================================================== */
+.review-page-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  border: none;
+  background: none;
+  padding: 0 0 24px 0;
+}
+
+.review-header-status {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* Success flash banner shown on the queue after a review decision */
+.review-flash-banner {
+  margin-bottom: 24px;
+  position: relative;
+}
+
+.review-flash-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0.7;
+  transition: opacity 0.2s ease;
+}
+
+.review-flash-close:hover {
+  opacity: 1;
+}
+
+/* ==========================================================================
+   Review Grid Layout (preview + controls split)
+   ========================================================================== */
+.review-grid-layout {
+  display: grid;
+  grid-template-columns: 1fr 340px;
+  gap: 24px;
+  align-items: start;
+  text-align: left;
+}
+
+/* ==========================================================================
+   Review Open Button (queue table action)
+   ========================================================================== */
+.review-open-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #FFFFFF;
+  background-color: var(--posts-red);
+  border: 1px solid var(--posts-red);
+  border-radius: var(--posts-radius);
+  text-decoration: none;
+  transition: all 0.2s ease;
+  white-space: nowrap;
+}
+
+.review-open-btn:hover {
+  background-color: var(--posts-red-hover);
+  border-color: var(--posts-red-hover);
+}
+
+.review-open-btn:focus-visible {
+  outline: 2px solid var(--posts-red);
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
+   Article Preview (read-only sanitized rich content)
+   ========================================================================== */
+.review-preview-title {
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--dash-navy);
+  margin: 0 0 12px 0;
+  line-height: 1.3;
+}
+
+.review-preview-excerpt {
+  font-size: 15px;
+  color: var(--posts-text-secondary);
+  font-style: italic;
+  border-left: 3px solid var(--dash-gold);
+  padding: 6px 0 6px 14px;
+  margin: 0 0 20px 0;
+}
+
+.article-preview-content {
+  font-size: 15px;
+  line-height: 1.7;
+  color: var(--posts-text-primary);
+}
+
+.article-preview-content p {
+  margin: 0 0 14px 0;
+}
+
+.article-preview-content h1,
+.article-preview-content h2 {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--dash-navy);
+  margin: 24px 0 12px 0;
+}
+
+.article-preview-content h3 {
+  font-size: 17px;
+  font-weight: 600;
+  color: var(--dash-navy);
+  margin: 20px 0 10px 0;
+}
+
+.article-preview-content ul,
+.article-preview-content ol {
+  margin: 0 0 14px 22px;
+  padding: 0;
+}
+
+.article-preview-content li {
+  margin-bottom: 6px;
+}
+
+.article-preview-content blockquote {
+  border-left: 4px solid var(--posts-red);
+  margin: 18px 0;
+  padding: 4px 16px;
+  color: var(--posts-text-secondary);
+  font-style: italic;
+  background-color: var(--posts-input-bg);
+  border-radius: 0 var(--posts-radius) var(--posts-radius) 0;
+}
+
+.article-preview-content a {
+  color: var(--posts-red);
+  text-decoration: underline;
+}
+
+.article-preview-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: var(--posts-radius);
+}
+
+/* ==========================================================================
+   Featured Image Preview
+   ========================================================================== */
+.review-featured-image-wrapper {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.review-featured-image {
+  width: 100%;
+  max-height: 320px;
+  object-fit: cover;
+  border-radius: var(--posts-radius);
+  border: 1px solid var(--posts-border);
+  background-color: #F1F5F9;
+}
+
+.review-alt-text-line {
+  font-size: 12.5px;
+  color: var(--posts-text-secondary);
+  margin: 0;
+}
+
+/* ==========================================================================
+   Submission Metadata Grid
+   ========================================================================== */
+.review-meta-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 16px;
+}
+
+.review-meta-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.review-meta-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--posts-text-muted);
+}
+
+.review-meta-value {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--posts-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.review-slug-value {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 13px;
+}
+
+.review-seo-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px dashed var(--posts-border);
+}
+
+/* Category chips */
+.review-category-chips {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.review-category-chip {
+  display: inline-block;
+  font-size: 11.5px;
+  font-weight: 600;
+  background-color: var(--dash-gold-light);
+  color: #926E2D;
+  border-radius: 999px;
+  padding: 3px 10px;
+  white-space: nowrap;
+}
+
+/* ==========================================================================
+   Review Decision Panel
+   ========================================================================== */
+.review-actions-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-actions-buttons {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.review-actions-buttons .editor-btn {
+  justify-content: center;
+  width: 100%;
+}
+
+.review-return-btn {
+  background-color: #FFF7ED;
+  color: #C2410C;
+  border: 1px solid rgba(194, 65, 12, 0.25);
+}
+
+.review-return-btn:hover:not(:disabled) {
+  background-color: #FFEDD5;
+}
+
+.review-edit-before-publish-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  padding: 10px 16px;
+  font-size: 13.5px;
+  font-weight: 600;
+  color: var(--posts-text-primary);
+  border: 1px dashed var(--posts-border);
+  border-radius: var(--posts-radius);
+  text-decoration: none;
+  background-color: var(--posts-input-bg);
+  transition: all 0.2s ease;
+}
+
+.review-edit-before-publish-btn:hover {
+  border-color: var(--posts-red);
+  color: var(--posts-red);
+  background-color: var(--posts-red-light);
+}
+
+/* ==========================================================================
+   Review Notes Panel
+   ========================================================================== */
+.review-notes-panel {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+
+.review-notes-loading,
+.review-notes-empty,
+.review-notes-error {
+  padding: 8px 0;
+}
+
+.review-notes-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  color: var(--posts-text-muted);
+  text-align: center;
+}
+
+.review-notes-empty p {
+  font-size: 13px;
+  margin: 0;
+}
+
+.review-notes-error {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--aasu-error-red);
+  background-color: var(--aasu-error-bg);
+  border: 1px solid rgba(211, 47, 47, 0.2);
+  border-radius: var(--posts-radius);
+  padding: 10px 12px;
+}
+
+.review-notes-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-height: 340px;
+  overflow-y: auto;
+}
+
+.review-note-item {
+  background-color: var(--posts-input-bg);
+  border: 1px solid var(--posts-border);
+  border-radius: var(--posts-radius);
+  padding: 12px 14px;
+}
+
+.review-note-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.review-note-author {
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--dash-navy);
+}
+
+.review-note-date {
+  font-size: 11px;
+  color: var(--posts-text-muted);
+  white-space: nowrap;
+}
+
+.review-note-text {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--posts-text-primary);
+  margin: 0;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+}
+
+/* Admin note composer */
+.review-note-composer {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  border-top: 1px solid var(--posts-border);
+  padding-top: 14px;
+}
+
+.review-note-composer label {
+  font-size: 12px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--posts-text-secondary);
+}
+
+.review-note-composer textarea {
+  width: 100%;
+  padding: 10px 14px;
+  font-size: 14px;
+  font-family: inherit;
+  border: 1px solid var(--posts-border);
+  border-radius: var(--posts-radius);
+  background-color: var(--posts-input-bg);
+  color: var(--posts-text-primary);
+  resize: vertical;
+  box-sizing: border-box;
+  transition: all 0.2s ease;
+}
+
+.review-note-composer textarea:focus {
+  outline: none;
+  border-color: var(--posts-red);
+  background-color: var(--posts-bg);
+  box-shadow: 0 0 0 3px rgba(227, 27, 35, 0.15);
+}
+
+.review-note-composer textarea.has-error {
+  border-color: var(--aasu-error-red);
+}
+
+.review-note-submit {
+  align-self: flex-end;
+  background-color: var(--dash-navy);
+  color: #FFFFFF;
+  border: 1px solid var(--dash-navy);
+}
+
+.review-note-submit:hover:not(:disabled) {
+  background-color: var(--dash-navy-light);
+}
+
+/* ==========================================================================
+   Contributor Feedback Cards (queue page, contributor view)
+   ========================================================================== */
+.review-feedback-list {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.review-feedback-card {
+  background-color: var(--posts-bg);
+  border: 1px solid var(--posts-border);
+  border-radius: var(--posts-radius);
+  padding: 20px;
+  box-shadow: var(--posts-shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  text-align: left;
+}
+
+.review-feedback-card-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 12px;
+}
+
+.review-feedback-title-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.review-feedback-title-row .post-title-cell-bold {
+  font-size: 16px;
+}
+
+.review-feedback-type {
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--posts-text-muted);
+}
+
+.review-feedback-latest {
+  background-color: var(--posts-input-bg);
+  border-left: 3px solid var(--dash-gold);
+  border-radius: var(--posts-radius);
+  padding: 12px 14px;
+}
+
+.review-feedback-latest-label {
+  display: block;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  color: var(--posts-text-muted);
+  margin-bottom: 6px;
+}
+
+.review-feedback-note-text {
+  font-size: 13.5px;
+  line-height: 1.55;
+  color: var(--posts-text-primary);
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.review-feedback-card-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  border-top: 1px solid var(--posts-border);
+  padding-top: 14px;
+}
+
+.review-feedback-status-label {
+  font-size: 13px;
+  font-weight: 700;
+  padding: 6px 12px;
+  border-radius: var(--posts-radius);
+}
+
+.review-feedback-status-label.awaiting {
+  background-color: #EEF2FF;
+  color: #4F46E5;
+}
+
+.review-feedback-status-label.approved {
+  background-color: var(--dash-green-light);
+  color: var(--dash-green);
+}
+
+/* ==========================================================================
+   Contributor Status Block (review post page)
+   ========================================================================== */
+.review-contributor-status-block {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  align-items: flex-start;
+}
+
+.review-contributor-hint {
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--posts-text-secondary);
+  margin: 0;
+}
+
+/* ==========================================================================
+   Sidebar Awaiting-Review Count Badge
+   ========================================================================== */
+.review-count-badge {
+  margin-left: auto;
+  font-size: 10.5px;
+  font-weight: 700;
+  background-color: var(--posts-red);
+  color: #FFFFFF;
+  border-radius: 999px;
+  padding: 2px 8px;
+  line-height: 1.4;
+  white-space: nowrap;
+}
+
+.dashboard-shell.sidebar-collapsed .review-count-badge {
+  display: none;
+}
+
+/* ==========================================================================
+   Responsive Queries
+   ========================================================================== */
+@media (max-width: 1024px) {
+  .review-grid-layout {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 768px) {
+  .review-page-header {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 12px;
+  }
+
+  .review-meta-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .review-feedback-card-header {
+    flex-direction: column;
+  }
+
+  .review-feedback-card-actions {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .review-feedback-card-actions a {
+    justify-content: center;
+  }
+}
