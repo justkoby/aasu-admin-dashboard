@@ -315,10 +315,16 @@ export default function PostEditorPage() {
     }
   }
 
-  // Common Post Saving Logic
+  // Common Post Saving Logic.
+  // Returns true on success, false on failure — contributor submissions use
+  // the result to keep the confirmation modal open (preserving the typed note)
+  // whenever the status update fails.
   const handleSavePost = async (formValues, statusAction, contributorNote = null) => {
     setIsSubmitting(true)
     setSaveStatus(null)
+
+    const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
+    const isContributorSubmit = !isAdminRole && statusAction === 'submit'
 
     try {
       const currentSlug = formValues.slug.toLowerCase().trim()
@@ -364,8 +370,6 @@ export default function PostEditorPage() {
         seo_title: formValues.seo_title || null,
         seo_description: formValues.seo_description || null
       }
-
-      const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
 
       let payload
       if (!isEditMode) {
@@ -439,14 +443,22 @@ export default function PostEditorPage() {
         } else if (statusAction === 'submit' && isAdminRole) {
           payload.status = 'in_review'
           payload.submitted_at = new Date().toISOString()
+        } else if (statusAction === 'submit') {
+          // Contributor resubmission: a single update saves the revision and
+          // transitions to in_review while clearing the previous review cycle —
+          // reviewed_by / reviewed_at describe the current cycle, not history.
+          payload.status = 'in_review'
+          payload.submitted_at = new Date().toISOString()
+          payload.hero_position = 'none'
+          payload.published_at = null
+          payload.reviewed_by = null
+          payload.reviewed_at = null
         } else {
-          // draft — default save action. Contributor resubmissions save the
-          // revision as draft first; the in_review transition follows below.
+          // draft — default save action
           payload.status = 'draft'
         }
       }
       // 3. Upsert Post Record
-      const isContributorSubmit = !isAdminRole && statusAction === 'submit'
       let savedPost = null
       let submissionFailedAfterDraft = false
       if (isEditMode) {
@@ -472,42 +484,8 @@ export default function PostEditorPage() {
           throw updateErr
         }
         savedPost = data
-
-        // Contributor resubmission: the revision is saved as draft first, then
-        // the post is transitioned to in_review as a separate update.
-        if (isContributorSubmit) {
-          const submissionUpdate = {
-            status: 'in_review',
-            submitted_at: new Date().toISOString(),
-            hero_position: 'none',
-            published_at: null,
-            reviewed_by: null,
-            reviewed_at: null
-          }
-          const { data: submittedData, error: submitUpdateErr } = await supabase
-            .from('posts')
-            .update(submissionUpdate)
-            .eq('id', id)
-            .eq('author_id', authenticatedUser.id)
-            .select()
-            .single()
-
-          if (submitUpdateErr) {
-            console.error({
-              code: submitUpdateErr.code,
-              message: submitUpdateErr.message,
-              details: submitUpdateErr.details,
-              hint: submitUpdateErr.hint,
-              payload: submissionUpdate,
-              authenticatedUserId: authenticatedUser.id,
-              existingPostAuthorId: originalPost?.author_id ?? null,
-              existingPostStatus: originalPost?.status ?? null
-            })
-            submissionFailedAfterDraft = true
-          } else {
-            savedPost = submittedData
-          }
-        }
+        // Contributor resubmissions are completed by the single update above —
+        // no separate in_review transition is needed in edit mode.
       } else {
         const { data, error: insertErr } = await supabase
           .from('posts')
@@ -530,11 +508,16 @@ export default function PostEditorPage() {
       }
 
       // Two-step contributor submission on initial creation: the insert lands as a
-      // draft first, then the new post is immediately moved to in_review.
+      // draft first, then the new post is immediately moved to in_review with the
+      // exact lifecycle reset used for every contributor submission/resubmission.
       if (!isEditMode && isContributorSubmit) {
         const submissionUpdate = {
           status: 'in_review',
-          submitted_at: new Date().toISOString()
+          submitted_at: new Date().toISOString(),
+          hero_position: 'none',
+          published_at: null,
+          reviewed_by: null,
+          reviewed_at: null
         }
         const { error: submitUpdateErr } = await supabase
           .from('posts')
@@ -622,18 +605,26 @@ export default function PostEditorPage() {
 
       // 5. Report save state
       if (submissionFailedAfterDraft) {
-        // The draft exists — continue on its edit page so retrying never duplicates the post
+        // New-post flow: the draft exists — continue on its edit page so retrying never duplicates the post
         navigate(`/dashboard/posts/${savedPost.id}/edit`, {
           state: {
             type: 'warning',
             message: 'Your post was saved as a draft, but it could not be submitted for review.'
           }
         })
-      } else if (!categoryAssignmentSuccess) {
+      } else if (!categoryAssignmentSuccess && !isContributorSubmit) {
         setSaveStatus({
           type: 'warning',
           message: 'Post saved successfully, but category assignment failed. Please open the post again to re-apply categories.'
         })
+      } else if (isContributorSubmit && noteFailed) {
+        // The post is safely in review — only the note failed. Stay in place
+        // (modal remains open, note preserved) with the mandated warning.
+        setSaveStatus({
+          type: 'warning',
+          message: 'Your post was submitted, but the note could not be attached.'
+        })
+        return false
       } else if (isContributorSubmit) {
         // Contributor submission confirmed — back to My Posts with the notice
         navigate('/dashboard/posts', {
@@ -648,6 +639,7 @@ export default function PostEditorPage() {
         // Success -> redirect
         navigate('/dashboard/posts')
       }
+      return true
     } catch (err) {
       // Log full technical error for development debugging
       console.error('Post save failed:', err)
@@ -667,6 +659,9 @@ export default function PostEditorPage() {
       }
 
       setSaveStatus({ type: 'error', message: friendlyMessage })
+      // Contributor submissions fail in place: the modal stays open, the typed
+      // note is preserved and no note was inserted. Other flows return false too.
+      return false
     } finally {
       setIsSubmitting(false)
     }
@@ -689,11 +684,15 @@ export default function PostEditorPage() {
     setPendingSubmission(formValues)
   }
 
-  // Modal confirmation — runs the submission flow with the optional note
+  // Modal confirmation — runs the submission flow with the optional note.
+  // The modal closes only after a successful submission; on failure it stays
+  // open so the contributor's typed note is preserved for a retry.
   const handleConfirmSubmission = async () => {
     const formValues = pendingSubmission
-    setPendingSubmission(null)
-    await handleSavePost(formValues, 'submit', submissionNote)
+    const success = await handleSavePost(formValues, 'submit', submissionNote)
+    if (success) {
+      setPendingSubmission(null)
+    }
   }
 
   // Handler for Publish (requires Admin credentials and confirm dialog)
@@ -1139,7 +1138,8 @@ export default function PostEditorPage() {
         </div>
       </form>
 
-      {/* Contributor submission confirmation modal (optional note to reviewer) */}
+      {/* Contributor submission confirmation modal (optional note to reviewer).
+          Failures keep it open; saveStatus is surfaced inside as the notice. */}
       {pendingSubmission && (
         <SubmissionModal
           note={submissionNote}
@@ -1147,6 +1147,7 @@ export default function PostEditorPage() {
           onCancel={() => setPendingSubmission(null)}
           onConfirm={handleConfirmSubmission}
           isSubmitting={isSubmitting}
+          notice={saveStatus}
         />
       )}
     </div>

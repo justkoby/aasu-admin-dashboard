@@ -1,5 +1,5 @@
 import React from 'react'
-import { FileCheck, X } from 'lucide-react'
+import { FileCheck, X, AlertTriangle, CheckCircle2 } from 'lucide-react'
 
 export const MAX_SUBMISSION_NOTE_LENGTH = 1000
 
@@ -7,13 +7,16 @@ export const MAX_SUBMISSION_NOTE_LENGTH = 1000
  * Professional confirmation dialog shown when a contributor submits or
  * resubmits a post for review. The "Note to Reviewer" textarea is optional;
  * when provided, the note is stored as a contributor_note review note.
+ * Failed submissions keep the modal open (typed note preserved) and surface
+ * the failure via the in-modal `notice` banner.
  */
 export default function SubmissionModal({
   note,
   onNoteChange,
   onCancel,
   onConfirm,
-  isSubmitting
+  isSubmitting,
+  notice
 }) {
   return (
     <div
@@ -35,6 +38,18 @@ export default function SubmissionModal({
             <X size={18} />
           </button>
         </div>
+
+        {/* In-modal status notice (submission failures, partial successes) */}
+        {notice?.message && (
+          <div className={`editor-notification-banner ${notice.type}`} style={{ marginBottom: '16px' }}>
+            {notice.type === 'error' || notice.type === 'warning' ? (
+              <AlertTriangle size={18} />
+            ) : (
+              <CheckCircle2 size={18} />
+            )}
+            <span>{notice.message}</span>
+          </div>
+        )}
 
         <p className="submission-modal-intro">
           Your post will be sent to the editorial team for review. You can
