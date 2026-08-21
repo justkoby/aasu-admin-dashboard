@@ -118,10 +118,11 @@ export default function ReviewQueuePage() {
     setIsLoading(true)
     setError(null)
     try {
-      // Inner join keeps only posts that have at least one review note
+      // Inner join keeps only posts that have at least one review note;
+      // reviewer profile is resolved through the explicit FK alias
       let result = await supabase
         .from('posts')
-        .select('*, review_notes!inner(id, note, created_at)')
+        .select('*, review_notes!inner(id, note, created_at, author:profiles!review_notes_author_id_fkey(full_name, email))')
         .eq('author_id', user.id)
         .order('updated_at', { ascending: false })
 
@@ -214,6 +215,13 @@ export default function ReviewQueuePage() {
     )[0]
   }
 
+  // Human-readable reviewer name — never expose raw UUIDs
+  const resolveReviewer = (note) => {
+    if (note.author?.full_name) return note.author.full_name
+    if (note.author?.email) return note.author.email
+    return 'Administrator'
+  }
+
   // Shared error screen
   if (error) {
     const isConnErr =
@@ -296,11 +304,21 @@ export default function ReviewQueuePage() {
               return (
                 <div className="review-feedback-card" key={post.id}>
                   <div className="review-feedback-card-header">
-                    <div className="review-feedback-title-row">
-                      <Link to={`/dashboard/review/${post.id}`} className="post-title-cell-bold">
-                        {post.title || 'Untitled'}
-                      </Link>
-                      <span className="review-feedback-type">{formatType(post.type)}</span>
+                    <div className="review-feedback-thumb-title">
+                      <img
+                        src={post.featured_image_url || '/aasu-logo.png'}
+                        alt={post.featured_image_alt || 'Post thumbnail'}
+                        className="review-feedback-thumb"
+                        onError={(e) => {
+                          e.target.src = '/aasu-logo.png'
+                        }}
+                      />
+                      <div className="review-feedback-title-row">
+                        <Link to={`/dashboard/review/${post.id}`} className="post-title-cell-bold">
+                          {post.title || 'Untitled'}
+                        </Link>
+                        <span className="review-feedback-type">{formatType(post.type)}</span>
+                      </div>
                     </div>
                     <StatusBadge status={post.status} />
                   </div>
@@ -308,7 +326,7 @@ export default function ReviewQueuePage() {
                   {latestNote && (
                     <div className="review-feedback-latest">
                       <span className="review-feedback-latest-label">
-                        Latest feedback · {formatDate(latestNote.created_at)}
+                        Latest feedback · {resolveReviewer(latestNote)} · {formatDate(latestNote.created_at)}
                       </span>
                       <p className="review-feedback-note-text">{latestNote.note}</p>
                     </div>

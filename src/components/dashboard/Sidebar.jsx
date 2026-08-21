@@ -23,36 +23,50 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
   const userRole = profile?.role || 'contributor'
   const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
 
-  // Number of posts awaiting review — shown as a badge for administrators
+  // Notification count for the sidebar badge:
+  // - Administrators: posts awaiting review
+  // - Contributors: own draft posts that carry review notes (changes requested)
   const [reviewCount, setReviewCount] = useState(0)
 
   useEffect(() => {
-    if (!isAdminRole) return
     let isMounted = true
 
-    const fetchReviewCount = async () => {
-      const { count, error } = await supabase
-        .from('posts')
-        .select('id', { count: 'exact', head: true })
-        .eq('status', 'in_review')
+    const fetchBadgeCount = async () => {
+      if (isAdminRole) {
+        const { count, error } = await supabase
+          .from('posts')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'in_review')
 
-      if (!error && isMounted) {
-        setReviewCount(count || 0)
+        if (!error && isMounted) {
+          setReviewCount(count || 0)
+        }
+      } else if (profile?.id) {
+        // Contributor: drafts with at least one review note
+        const { data, error } = await supabase
+          .from('posts')
+          .select('id, review_notes!inner(id)')
+          .eq('author_id', profile.id)
+          .eq('status', 'draft')
+
+        if (isMounted) {
+          setReviewCount(error ? 0 : (data || []).length)
+        }
       }
     }
 
-    fetchReviewCount()
+    fetchBadgeCount()
     return () => {
       isMounted = false
     }
     // Re-count whenever the user navigates so the badge stays fresh
-  }, [isAdminRole, location.pathname])
+  }, [isAdminRole, profile?.id, location.pathname])
 
   // Helper to determine if link is active in routing
   const isActive = (path) => location.pathname === path
 
   // Helper to render sidebar items
-  const renderItem = (label, icon, path, comingNext = false, count = 0) => {
+  const renderItem = (label, icon, path, comingNext = false, count = 0, badgeTitle = 'Items needing attention') => {
     const active = isActive(path)
     
     const content = (
@@ -65,7 +79,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
           <span className="coming-soon-badge">Coming next</span>
         )}
         {!comingNext && count > 0 && (
-          <span className="review-count-badge" title={`${count} awaiting review`}>{count}</span>
+          <span className="review-count-badge" title={badgeTitle}>{count}</span>
         )}
       </>
     )
@@ -146,7 +160,8 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         icon: <ClipboardList size={20} className="sidebar-icon" />,
         path: '/dashboard/review',
         comingNext: false,
-        count: reviewCount
+        count: reviewCount,
+        badgeTitle: 'Posts awaiting review'
       })
     } else {
       // Contributor role
@@ -154,7 +169,9 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         label: 'Review Feedback',
         icon: <ClipboardList size={20} className="sidebar-icon" />,
         path: '/dashboard/review',
-        comingNext: false
+        comingNext: false,
+        count: reviewCount,
+        badgeTitle: 'Drafts with requested changes'
       })
     }
 
@@ -258,7 +275,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
             <span className="sidebar-group-label">{section.label}</span>
             <div className="sidebar-group-links">
               {section.items.map((item) =>
-                renderItem(item.label, item.icon, item.path, item.comingNext, item.count || 0)
+                renderItem(item.label, item.icon, item.path, item.comingNext, item.count || 0, item.badgeTitle)
               )}
             </div>
           </div>

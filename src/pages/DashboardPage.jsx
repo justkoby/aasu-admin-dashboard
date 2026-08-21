@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import StatCard from '../components/dashboard/StatCard'
@@ -25,6 +25,7 @@ export default function DashboardPage() {
   })
   const [recentPosts, setRecentPosts] = useState([])
   const [activityLogs, setActivityLogs] = useState([])
+  const [changesRequested, setChangesRequested] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
 
@@ -105,6 +106,42 @@ export default function DashboardPage() {
           setActivityLogs(logsData)
         }
       }
+
+      // 4. Fetch drafts with requested changes (Contributor only)
+      if (profile?.role === 'contributor' && profile?.id) {
+        let requestedData = []
+        try {
+          const { data, error: reqErr } = await supabase
+            .from('posts')
+            .select('id, title, updated_at, review_notes!inner(id, note, created_at, author:profiles!review_notes_author_id_fkey(full_name, email))')
+            .eq('author_id', profile.id)
+            .eq('status', 'draft')
+            .order('updated_at', { ascending: false })
+            .limit(5)
+
+          if (reqErr) throw reqErr
+          requestedData = data || []
+        } catch (e) {
+          console.warn('Changes requested query failed, running fallback query:', e)
+          try {
+            const { data, error: fbErr } = await supabase
+              .from('posts')
+              .select('id, title, updated_at, review_notes!inner(id, note, created_at)')
+              .eq('author_id', profile.id)
+              .eq('status', 'draft')
+              .order('updated_at', { ascending: false })
+              .limit(5)
+
+            if (!fbErr) requestedData = data || []
+          } catch (fallbackErr) {
+            console.warn('Changes requested fallback query also failed:', fallbackErr)
+          }
+        }
+
+        if (isMounted) {
+          setChangesRequested(requestedData)
+        }
+      }
     } catch (err) {
       console.error('Error loading dashboard stats:', err)
       if (isMounted) {
@@ -145,6 +182,22 @@ export default function DashboardPage() {
     } catch (e) {
       return 'N/A'
     }
+  }
+
+  // Resolve the most recent review note attached to a post
+  const getLatestNote = (post) => {
+    const notes = post.review_notes || []
+    if (notes.length === 0) return null
+    return [...notes].sort(
+      (a, b) => new Date(b.created_at) - new Date(a.created_at)
+    )[0]
+  }
+
+  // Human-readable reviewer name — never expose raw UUIDs
+  const resolveReviewer = (note) => {
+    if (note.author?.full_name) return note.author.full_name
+    if (note.author?.email) return note.author.email
+    return 'Administrator'
   }
 
   const renderHeroPlacement = (post) => {
@@ -232,6 +285,39 @@ export default function DashboardPage() {
           loading={isLoading}
         />
       </div>
+
+      {/* 1.5 Changes Requested Panel (Contributor only) */}
+      {profile?.role === 'contributor' && !isLoading && changesRequested.length > 0 && (
+        <div className="panel-card changes-requested-panel">
+          <div className="panel-header">
+            <h2>Changes Requested</h2>
+          </div>
+          <div className="changes-requested-list">
+            {changesRequested.map((post) => {
+              const latestNote = getLatestNote(post)
+              return (
+                <div className="changes-requested-item" key={post.id}>
+                  <div className="changes-requested-main">
+                    <span className="changes-requested-title">{post.title || 'Untitled'}</span>
+                    {latestNote && (
+                      <>
+                        <p className="changes-requested-note">{latestNote.note}</p>
+                        <span className="changes-requested-meta">
+                          {resolveReviewer(latestNote)} · {formatDate(latestNote.created_at)}
+                        </span>
+                      </>
+                    )}
+                  </div>
+                  <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
+                    <FileEdit size={14} />
+                    <span>Open and Revise</span>
+                  </Link>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
 
       {/* 2. Main Panels Grid */}
       <div className={`dashboard-grid-panels ${!showActivityLogs ? 'single-column' : ''}`}>

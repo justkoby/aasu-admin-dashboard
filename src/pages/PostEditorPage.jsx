@@ -8,7 +8,7 @@ import { supabase } from '../lib/supabaseClient'
 import { createSlug } from '../utils/createSlug'
 import RichTextEditor from '../components/posts/RichTextEditor'
 import FeaturedImageUploader from '../components/posts/FeaturedImageUploader'
-import { ArrowLeft, Save, Sparkles, CheckCircle2, AlertTriangle, FileCheck } from 'lucide-react'
+import { ArrowLeft, Save, Sparkles, CheckCircle2, AlertTriangle, FileCheck, MessageSquareText, ChevronDown, ChevronUp } from 'lucide-react'
 import '../styles/posts.css'
 
 // Form Zod Validation Schema
@@ -50,6 +50,10 @@ export default function PostEditorPage() {
   const [categories, setCategories] = useState([])
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([])
   const [originalPost, setOriginalPost] = useState(null)
+  // Editorial feedback notes attached to a returned draft
+  const [reviewNotes, setReviewNotes] = useState([])
+  // Collapsible older-notes history inside the feedback panel
+  const [showFeedbackHistory, setShowFeedbackHistory] = useState(false)
   
   const [isLoading, setIsLoading] = useState(isEditMode)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -180,6 +184,32 @@ export default function PostEditorPage() {
 
           setSelectedCategoryIds(catConnections.map((conn) => conn.category_id))
         }
+
+        // 3. Fetch editorial feedback when the draft was returned with review notes
+        if (post.status === 'draft') {
+          try {
+            let notesResult = await supabase
+              .from('review_notes')
+              .select('*, author:profiles!review_notes_author_id_fkey(full_name, email)')
+              .eq('post_id', id)
+              .order('created_at', { ascending: false })
+
+            if (notesResult.error) {
+              console.warn('Review notes join failed, running fallback query:', notesResult.error)
+              notesResult = await supabase
+                .from('review_notes')
+                .select('*')
+                .eq('post_id', id)
+                .order('created_at', { ascending: false })
+            }
+
+            if (!notesResult.error && isMounted) {
+              setReviewNotes(notesResult.data || [])
+            }
+          } catch (notesErr) {
+            console.warn('Could not load review notes for the editor:', notesErr)
+          }
+        }
       } catch (err) {
         console.error('Error loading post:', err)
         if (isMounted) {
@@ -221,6 +251,31 @@ export default function PostEditorPage() {
       if (!confirm) return
     }
     navigate('/dashboard/posts')
+  }
+
+  // Format a timestamp including date and time for review notes
+  const formatDateTime = (dateStr) => {
+    if (!dateStr) return 'N/A'
+    try {
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return 'N/A'
+      return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit'
+      })
+    } catch (e) {
+      return 'N/A'
+    }
+  }
+
+  // Human-readable reviewer name — never expose raw UUIDs
+  const resolveReviewer = (note) => {
+    if (note.author?.full_name) return note.author.full_name
+    if (note.author?.email) return note.author.email
+    return 'Administrator'
   }
 
   // Common Post Saving Logic
@@ -344,6 +399,13 @@ export default function PostEditorPage() {
           type: 'warning',
           message: 'Post saved successfully, but category assignment failed. Please open the post again to re-apply categories.'
         })
+      } else if (statusAction === 'submit' && reviewNotes.length > 0) {
+        // Resubmission of a revised draft — confirm on the Review Feedback page
+        navigate('/dashboard/review', {
+          state: {
+            message: `"${formValues.title || 'The revised post'}" was sent back for review. The editorial team will take another look.`
+          }
+        })
       } else {
         // Success -> redirect
         navigate('/dashboard/posts')
@@ -451,6 +513,65 @@ export default function PostEditorPage() {
             <CheckCircle2 size={20} />
           )}
           <span>{saveStatus.message}</span>
+        </div>
+      )}
+
+      {/* Requested Changes Feedback Panel (drafts with review notes only) */}
+      {isEditMode && reviewNotes.length > 0 && (
+        <div className="editor-feedback-panel">
+          <div className="editor-feedback-header">
+            <MessageSquareText size={18} />
+            <h3>Changes Requested</h3>
+          </div>
+          <p className="editor-feedback-instruction">
+            An administrator has reviewed this draft and requested changes. Update the article
+            below using their feedback, then submit it for review again. Your feedback history
+            is preserved and visible to the editorial team.
+          </p>
+
+          {/* Latest review note (newest first) */}
+          <div className="review-note-item editor-feedback-latest-note">
+            <div className="review-note-header">
+              <span className="review-note-author">{resolveReviewer(reviewNotes[0])}</span>
+              <span className="review-note-date">{formatDateTime(reviewNotes[0].created_at)}</span>
+            </div>
+            <p className="review-note-text">{reviewNotes[0].note}</p>
+          </div>
+
+          {/* Collapsible earlier feedback history */}
+          {reviewNotes.length > 1 && (
+            <div className="editor-feedback-history">
+              <button
+                type="button"
+                className="editor-feedback-history-toggle"
+                onClick={() => setShowFeedbackHistory(!showFeedbackHistory)}
+                aria-expanded={showFeedbackHistory}
+              >
+                {showFeedbackHistory ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+                <span>
+                  {showFeedbackHistory
+                    ? 'Hide feedback history'
+                    : `View feedback history (${reviewNotes.length - 1} earlier ${
+                        reviewNotes.length - 1 === 1 ? 'note' : 'notes'
+                      })`}
+                </span>
+              </button>
+
+              {showFeedbackHistory && (
+                <div className="editor-feedback-notes">
+                  {reviewNotes.slice(1).map((note) => (
+                    <div className="review-note-item" key={note.id}>
+                      <div className="review-note-header">
+                        <span className="review-note-author">{resolveReviewer(note)}</span>
+                        <span className="review-note-date">{formatDateTime(note.created_at)}</span>
+                      </div>
+                      <p className="review-note-text">{note.note}</p>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 

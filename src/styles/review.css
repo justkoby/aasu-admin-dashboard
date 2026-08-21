@@ -475,6 +475,23 @@
   font-size: 16px;
 }
 
+.review-feedback-thumb-title {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  min-width: 0;
+}
+
+.review-feedback-thumb {
+  width: 60px;
+  height: 45px;
+  border-radius: 4px;
+  object-fit: cover;
+  background-color: #F1F5F9;
+  border: 1px solid var(--posts-border);
+  flex-shrink: 0;
+}
+
 .review-feedback-type {
   font-size: 11px;
   font-weight: 700;
@@ -571,6 +588,147 @@
 }
 
 /* ==========================================================================
+   Dashboard "Changes Requested" Panel (contributor)
+   ========================================================================== */
+.changes-requested-panel {
+  margin-bottom: 24px;
+  border-left: 4px solid #C2410C;
+}
+
+.changes-requested-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 16px 20px;
+}
+
+.changes-requested-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  background-color: var(--posts-input-bg);
+  border: 1px solid var(--posts-border);
+  border-radius: var(--posts-radius);
+  padding: 14px 16px;
+  text-align: left;
+}
+
+.changes-requested-main {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  min-width: 0;
+}
+
+.changes-requested-title {
+  font-size: 14.5px;
+  font-weight: 700;
+  color: var(--dash-navy);
+}
+
+.changes-requested-note {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--posts-text-primary);
+  overflow-wrap: anywhere;
+}
+
+.changes-requested-meta {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--posts-text-muted);
+}
+
+/* ==========================================================================
+   Post Editor "Changes Requested" Feedback Panel
+   ========================================================================== */
+.editor-feedback-panel {
+  background-color: #FFF7ED;
+  border: 1px solid rgba(194, 65, 12, 0.25);
+  border-left: 5px solid #C2410C;
+  border-radius: var(--posts-radius);
+  padding: 20px 24px;
+  margin-bottom: 24px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.editor-feedback-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: #C2410C;
+}
+
+.editor-feedback-header h3 {
+  margin: 0;
+  font-size: 16px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.editor-feedback-instruction {
+  margin: 0;
+  font-size: 13.5px;
+  line-height: 1.5;
+  color: var(--posts-text-secondary);
+}
+
+.editor-feedback-notes {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editor-feedback-notes .review-note-item {
+  background-color: #FFFFFF;
+}
+
+/* Emphasized latest note inside the editor feedback panel */
+.editor-feedback-latest-note {
+  background-color: #FFFFFF;
+  border-left: 3px solid #C2410C;
+}
+
+/* Collapsible older-notes history */
+.editor-feedback-history {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.editor-feedback-history-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  align-self: flex-start;
+  background: none;
+  border: 1px solid rgba(194, 65, 12, 0.3);
+  color: #C2410C;
+  font-size: 13px;
+  font-weight: 700;
+  font-family: inherit;
+  padding: 8px 14px;
+  border-radius: var(--posts-radius);
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.editor-feedback-history-toggle:hover {
+  background-color: rgba(194, 65, 12, 0.08);
+}
+
+.editor-feedback-history-toggle:focus-visible {
+  outline: 2px solid #C2410C;
+  outline-offset: 2px;
+}
+
+/* ==========================================================================
    Responsive Queries
    ========================================================================== */
 @media (max-width: 1024px) {
@@ -600,6 +758,15 @@
   }
 
   .review-feedback-card-actions a {
+    justify-content: center;
+  }
+
+  .changes-requested-item {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .changes-requested-item .edit-action-btn {
     justify-content: center;
   }
 }
