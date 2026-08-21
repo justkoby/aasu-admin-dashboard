@@ -859,3 +859,88 @@
     align-items: center;
   }
 }
+
+/* ==========================================================================
+   Submission confirmation modal (contributor note to reviewer)
+   ========================================================================== */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(13, 27, 42, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  z-index: 1000;
+}
+
+.submission-modal {
+  background: #ffffff;
+  border-radius: var(--posts-radius);
+  box-shadow: 0 20px 50px rgba(13, 27, 42, 0.25);
+  width: 100%;
+  max-width: 560px;
+  padding: 24px;
+}
+
+.submission-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.submission-modal-header h2 {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: var(--dash-navy);
+}
+
+.submission-modal-close {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border: none;
+  border-radius: var(--posts-radius);
+  background: transparent;
+  color: var(--dash-text-secondary);
+  cursor: pointer;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.submission-modal-close:hover:not(:disabled) {
+  background: var(--posts-input-bg);
+  color: var(--dash-navy);
+}
+
+.submission-modal-intro {
+  font-size: 14px;
+  color: var(--dash-text-secondary);
+  margin: 0 0 16px;
+}
+
+.submission-modal-meta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  margin-top: 4px;
+}
+
+.submission-modal-counter {
+  font-size: 12px;
+  color: var(--dash-text-secondary);
+  white-space: nowrap;
+}
+
+.submission-modal-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 20px;
+}

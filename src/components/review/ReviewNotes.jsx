@@ -1,5 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import { supabase } from '../../lib/supabaseClient'
+import { formatRole } from '../../utils/formatRole'
 import { MessageSquareText, Send, AlertCircle } from 'lucide-react'
 
 /**
@@ -24,9 +25,9 @@ export default function ReviewNotes({ postId, userId, isAdmin }) {
       // Prefer joining the note author profile via the explicit FK alias
       let result = await supabase
         .from('review_notes')
-        .select('*, author:profiles!review_notes_author_id_fkey(full_name, email)')
+        .select('*, author:profiles!review_notes_author_id_fkey(full_name, email, role)')
         .eq('post_id', postId)
-        .order('created_at', { ascending: false })
+        .order('created_at', { ascending: true })
 
       // Fallback without the join if the relation cannot be resolved
       if (result.error) {
@@ -35,7 +36,7 @@ export default function ReviewNotes({ postId, userId, isAdmin }) {
           .from('review_notes')
           .select('*')
           .eq('post_id', postId)
-          .order('created_at', { ascending: false })
+          .order('created_at', { ascending: true })
       }
 
       if (result.error) throw result.error
@@ -66,7 +67,8 @@ export default function ReviewNotes({ postId, userId, isAdmin }) {
       const { error: insertErr } = await supabase.from('review_notes').insert({
         post_id: postId,
         author_id: userId,
-        note: trimmed
+        note: trimmed,
+        note_type: 'reviewer_feedback'
       })
       if (insertErr) throw insertErr
 
@@ -111,9 +113,25 @@ export default function ReviewNotes({ postId, userId, isAdmin }) {
     return 'Administrator'
   }
 
+  // Human-readable role for the note author — never expose raw enum values
+  const resolveNoteRole = (note) => {
+    if (note.author?.role) return formatRole(note.author.role)
+    return 'Reviewer'
+  }
+
+  // Legacy notes predate note_type and were written by administrators
+  const effectiveNoteType = (note) => {
+    if (note.note_type) return note.note_type
+    const role = (note.author?.role || '').toLowerCase()
+    if (role === 'contributor') return 'contributor_note'
+    return 'reviewer_feedback'
+  }
+
   return (
     <div className="review-notes-panel">
-      {/* Notes history list */}
+      <h3 className="editorial-conversation-title">Editorial Conversation</h3>
+
+      {/* Chronological conversation list */}
       {isLoading ? (
         <div className="review-notes-loading">
           <div className="skeleton skeleton-text" style={{ width: '60%', height: '14px', marginBottom: '10px' }}></div>
@@ -131,16 +149,39 @@ export default function ReviewNotes({ postId, userId, isAdmin }) {
           <p>No review notes yet for this post.</p>
         </div>
       ) : (
-        <div className="review-notes-list">
-          {notes.map((note) => (
-            <div className="review-note-item" key={note.id}>
-              <div className="review-note-header">
-                <span className="review-note-author">{resolveNoteAuthor(note)}</span>
-                <span className="review-note-date">{formatDate(note.created_at)}</span>
+        <div className="review-notes-list editorial-conversation">
+          {notes.map((note) => {
+            const noteType = effectiveNoteType(note)
+            const isContributorNote = noteType === 'contributor_note'
+            return (
+              <div
+                className={`review-note-item conversation-item ${
+                  isContributorNote ? 'conversation-contributor' : 'conversation-reviewer'
+                }`}
+                key={note.id}
+              >
+                <div className="review-note-header">
+                  <span className="review-note-author">
+                    {resolveNoteAuthor(note)}
+                    <span className="review-note-role"> · {resolveNoteRole(note)}</span>
+                  </span>
+                  <span className="review-note-date">{formatDate(note.created_at)}</span>
+                </div>
+                <span
+                  className={`conversation-type-label ${
+                    isContributorNote ? 'contributor' : 'reviewer'
+                  }`}
+                >
+                  {isContributorNote
+                    ? isAdmin
+                      ? 'Contributor note'
+                      : 'Your note'
+                    : 'Reviewer feedback'}
+                </span>
+                <p className="review-note-text">{note.note}</p>
               </div>
-              <p className="review-note-text">{note.note}</p>
-            </div>
-          ))}
+            )
+          })}
         </div>
       )}
 

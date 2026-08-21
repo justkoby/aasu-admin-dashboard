@@ -56,7 +56,7 @@ export default function DashboardPage() {
       try {
         const { data, error: postsErr } = await supabase
           .from('posts')
-          .select('*, profiles(full_name)')
+          .select('*, author:profiles!posts_author_id_fkey(full_name, email)')
           .order('updated_at', { ascending: false })
           .limit(10)
         
@@ -113,7 +113,7 @@ export default function DashboardPage() {
         try {
           const { data, error: reqErr } = await supabase
             .from('posts')
-            .select('id, title, updated_at, review_notes!inner(id, note, created_at, author:profiles!review_notes_author_id_fkey(full_name, email))')
+            .select('id, title, updated_at, review_notes!inner(id, note, note_type, created_at, author:profiles!review_notes_author_id_fkey(full_name, email))')
             .eq('author_id', profile.id)
             .eq('status', 'draft')
             .order('updated_at', { ascending: false })
@@ -126,7 +126,7 @@ export default function DashboardPage() {
           try {
             const { data, error: fbErr } = await supabase
               .from('posts')
-              .select('id, title, updated_at, review_notes!inner(id, note, created_at)')
+              .select('id, title, updated_at, review_notes!inner(id, note, note_type, created_at)')
               .eq('author_id', profile.id)
               .eq('status', 'draft')
               .order('updated_at', { ascending: false })
@@ -186,7 +186,10 @@ export default function DashboardPage() {
 
   // Resolve the most recent review note attached to a post
   const getLatestNote = (post) => {
-    const notes = post.review_notes || []
+    // Only reviewer feedback counts as requested changes
+    const notes = (post.review_notes || []).filter(
+      (n) => (n.note_type || 'reviewer_feedback') === 'reviewer_feedback'
+    )
     if (notes.length === 0) return null
     return [...notes].sort(
       (a, b) => new Date(b.created_at) - new Date(a.created_at)
@@ -198,6 +201,22 @@ export default function DashboardPage() {
     if (note.author?.full_name) return note.author.full_name
     if (note.author?.email) return note.author.email
     return 'Administrator'
+  }
+
+  // Human-readable post author — never expose raw UUIDs
+  const resolveAuthor = (post) => {
+    if (post.author?.full_name) return post.author.full_name
+    if (post.author?.email) return post.author.email
+    return 'Unknown author'
+  }
+
+  // Title-case enum values for display (news -> News)
+  const formatType = (typeStr) => {
+    if (!typeStr) return 'Post'
+    return typeStr
+      .split(/[_-]+|\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ')
   }
 
   const renderHeroPlacement = (post) => {
@@ -219,7 +238,7 @@ export default function DashboardPage() {
     if (val === true || val === 'true' || val === 'Yes') {
       return <span className="badge hero-yes">Yes</span>
     }
-    return <span className="badge hero-no">No</span>
+    return <span className="badge hero-no">None</span>
   }
 
   const handleCreatePost = () => {
@@ -369,18 +388,13 @@ export default function DashboardPage() {
                   {recentPosts.map((post) => (
                     <tr key={post.id}>
                       <td className="post-title-cell">{post.title || 'Untitled'}</td>
-                      <td>{post.type || 'Post'}</td>
+                      <td>{formatType(post.type)}</td>
                       <td>
                         <span className={`badge status-${(post.status || 'draft').toLowerCase()}`}>
                           {post.status || 'Draft'}
                         </span>
                       </td>
-                      <td>
-                        {post.profiles?.full_name ||
-                          post.author_name ||
-                          post.author_id ||
-                          'Unknown'}
-                      </td>
+                      <td>{resolveAuthor(post)}</td>
                       <td>{formatDate(post.updated_at || post.created_at)}</td>
                       <td>{renderHeroPlacement(post)}</td>
                     </tr>

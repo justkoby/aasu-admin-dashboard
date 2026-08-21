@@ -770,3 +770,57 @@
     justify-content: center;
   }
 }
+
+/* ==========================================================================
+   Editorial conversation timeline (contributor notes + reviewer feedback)
+   ========================================================================== */
+.editorial-conversation-title {
+  font-size: 15px;
+  font-weight: 800;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--dash-navy);
+}
+
+.conversation-item {
+  border-left: 3px solid transparent;
+}
+
+.conversation-reviewer {
+  border-left-color: #C2410C;
+}
+
+.conversation-contributor {
+  border-left-color: var(--posts-red);
+  background: #F8FAFC;
+}
+
+.review-note-role {
+  color: var(--dash-text-secondary);
+  font-weight: 500;
+}
+
+.conversation-type-label {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.conversation-type-label.reviewer {
+  background: rgba(194, 65, 12, 0.12);
+  color: #C2410C;
+}
+
+.conversation-type-label.contributor {
+  background: rgba(227, 27, 35, 0.1);
+  color: var(--posts-red);
+}
+
+.review-feedback-latest.own-note {
+  border-left-color: var(--posts-red);
+  background: #F8FAFC;
+}

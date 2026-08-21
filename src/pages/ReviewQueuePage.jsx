@@ -122,7 +122,7 @@ export default function ReviewQueuePage() {
       // reviewer profile is resolved through the explicit FK alias
       let result = await supabase
         .from('posts')
-        .select('*, review_notes!inner(id, note, created_at, author:profiles!review_notes_author_id_fkey(full_name, email))')
+        .select('*, review_notes!inner(id, note, note_type, created_at, author:profiles!review_notes_author_id_fkey(full_name, email))')
         .eq('author_id', user.id)
         .order('updated_at', { ascending: false })
 
@@ -141,7 +141,7 @@ export default function ReviewQueuePage() {
         if (postIds.length > 0) {
           const { data: notes, error: notesErr } = await supabase
             .from('review_notes')
-            .select('id, post_id, note, created_at')
+            .select('id, post_id, note, note_type, created_at')
             .in('post_id', postIds)
           if (notesErr) throw notesErr
           for (const note of notes || []) {
@@ -207,8 +207,10 @@ export default function ReviewQueuePage() {
     return 'Unknown author'
   }
 
-  const getLatestNote = (post) => {
-    const notes = post.review_notes || []
+  const getLatestNoteByType = (post, type) => {
+    const notes = (post.review_notes || []).filter(
+      (n) => (n.note_type || 'reviewer_feedback') === type
+    )
     if (notes.length === 0) return null
     return [...notes].sort(
       (a, b) => new Date(b.created_at) - new Date(a.created_at)
@@ -299,7 +301,8 @@ export default function ReviewQueuePage() {
         ) : (
           <div className="review-feedback-list">
             {feedbackPosts.map((post) => {
-              const latestNote = getLatestNote(post)
+              const latestOwnNote = getLatestNoteByType(post, 'contributor_note')
+              const latestReviewerNote = getLatestNoteByType(post, 'reviewer_feedback')
               const status = (post.status || 'draft').toLowerCase()
               return (
                 <div className="review-feedback-card" key={post.id}>
@@ -323,12 +326,21 @@ export default function ReviewQueuePage() {
                     <StatusBadge status={post.status} />
                   </div>
 
-                  {latestNote && (
+                  {latestOwnNote && (
+                    <div className="review-feedback-latest own-note">
+                      <span className="review-feedback-latest-label">
+                        Your note · {formatDate(latestOwnNote.created_at)}
+                      </span>
+                      <p className="review-feedback-note-text">{latestOwnNote.note}</p>
+                    </div>
+                  )}
+
+                  {latestReviewerNote && (
                     <div className="review-feedback-latest">
                       <span className="review-feedback-latest-label">
-                        Latest feedback · {resolveReviewer(latestNote)} · {formatDate(latestNote.created_at)}
+                        Reviewer feedback · {resolveReviewer(latestReviewerNote)} · {formatDate(latestReviewerNote.created_at)}
                       </span>
-                      <p className="review-feedback-note-text">{latestNote.note}</p>
+                      <p className="review-feedback-note-text">{latestReviewerNote.note}</p>
                     </div>
                   )}
 

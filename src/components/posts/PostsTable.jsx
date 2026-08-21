@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import StatusBadge from './StatusBadge'
 import { Edit } from 'lucide-react'
 
-export default function PostsTable({ posts }) {
+export default function PostsTable({ posts, isContributor = false }) {
   const formatDate = (dateStr) => {
     if (!dateStr) return '-'
     try {
@@ -58,6 +58,10 @@ export default function PostsTable({ posts }) {
       .join(' ')
   }
 
+  // Contributors cannot open posts that are awaiting editorial review
+  const isLocked = (post) =>
+    isContributor && (post.status || '').toLowerCase() === 'in_review'
+
   return (
     <div className="posts-card-container">
       {/* 1. Desktop Table View */}
@@ -91,9 +95,13 @@ export default function PostsTable({ posts }) {
                 />
               </td>
               <td>
-                <Link to={`/dashboard/posts/${post.id}/edit`} className="post-title-cell-bold">
-                  {post.title || 'Untitled'}
-                </Link>
+                {isLocked(post) ? (
+                  <span className="post-title-cell-bold">{post.title || 'Untitled'}</span>
+                ) : (
+                  <Link to={`/dashboard/posts/${post.id}/edit`} className="post-title-cell-bold">
+                    {post.title || 'Untitled'}
+                  </Link>
+                )}
               </td>
               <td style={{ whiteSpace: 'nowrap' }}>{formatType(post.type)}</td>
               <td>{resolveAuthor(post)}</td>
@@ -104,10 +112,19 @@ export default function PostsTable({ posts }) {
               <td>{formatDate(post.published_at)}</td>
               <td>{renderHeroBadge(post.hero_position)}</td>
               <td>
-                <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
-                  <Edit size={14} />
-                  <span>Edit</span>
-                </Link>
+                {isLocked(post) ? (
+                  <span
+                    className="badge status-review"
+                    title="Editing is locked while the post is awaiting review"
+                  >
+                    Locked
+                  </span>
+                ) : (
+                  <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
+                    <Edit size={14} />
+                    <span>Edit</span>
+                  </Link>
+                )}
               </td>
             </tr>
           ))}
@@ -129,9 +146,13 @@ export default function PostsTable({ posts }) {
               />
               <div className="post-mobile-meta-title">
                 <span className="post-mobile-type">{formatType(post.type)}</span>
-                <Link to={`/dashboard/posts/${post.id}/edit`} className="post-mobile-title">
-                  {post.title || 'Untitled'}
-                </Link>
+                {isLocked(post) ? (
+                  <span className="post-mobile-title">{post.title || 'Untitled'}</span>
+                ) : (
+                  <Link to={`/dashboard/posts/${post.id}/edit`} className="post-mobile-title">
+                    {post.title || 'Untitled'}
+                  </Link>
+                )}
               </div>
             </div>
 
@@ -161,10 +182,19 @@ export default function PostsTable({ posts }) {
             </div>
 
             <div className="post-mobile-actions">
-              <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
-                <Edit size={14} />
-                <span>Edit Post</span>
-              </Link>
+              {isLocked(post) ? (
+                <span
+                  className="badge status-review"
+                  title="Editing is locked while the post is awaiting review"
+                >
+                  Locked
+                </span>
+              ) : (
+                <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
+                  <Edit size={14} />
+                  <span>Edit Post</span>
+                </Link>
+              )}
             </div>
           </div>
         ))}

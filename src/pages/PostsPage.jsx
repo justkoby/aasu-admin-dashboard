@@ -1,15 +1,19 @@
 import React, { useState, useEffect } from 'react'
-import { Link, useNavigate } from 'react-router-dom'
+import { Link, useNavigate, useLocation } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import PostFilters from '../components/posts/PostFilters'
 import PostsTable from '../components/posts/PostsTable'
-import { Plus, RefreshCw, FileText, ChevronLeft, ChevronRight, AlertTriangle } from 'lucide-react'
+import { Plus, RefreshCw, FileText, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import '../styles/posts.css'
 
 export default function PostsPage() {
   const { user, profile, loading: authLoading } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
+
+  // Cross-page notification (e.g. "Submitted for review successfully")
+  const [flash, setFlash] = useState(null)
 
   // Categories list state
   const [categories, setCategories] = useState([])
@@ -40,6 +44,15 @@ export default function PostsPage() {
     }, 400)
     return () => clearTimeout(timer)
   }, [searchTerm])
+
+  // Surface cross-page notifications once, then clear the navigation state
+  useEffect(() => {
+    const state = location.state
+    if (state?.message) {
+      setFlash({ type: state.type || 'success', message: state.message })
+      window.history.replaceState(null, '')
+    }
+  }, [location.state])
 
   // Fetch categories on mount
   useEffect(() => {
@@ -275,6 +288,17 @@ export default function PostsPage() {
         </Link>
       </div>
 
+      {/* Cross-page notification banner */}
+      {flash && (
+        <div
+          className={`editor-notification-banner ${flash.type}`}
+          style={{ marginBottom: '24px' }}
+        >
+          {flash.type === 'error' ? <AlertTriangle size={20} /> : <CheckCircle2 size={20} />}
+          <span>{flash.message}</span>
+        </div>
+      )}
+
       {/* Filter Toolbar */}
       <PostFilters
         filters={{ ...filters, search: searchTerm }}
@@ -312,7 +336,7 @@ export default function PostsPage() {
       ) : (
         // Table list
         <>
-          <PostsTable posts={posts} />
+          <PostsTable posts={posts} isContributor={profile?.role === 'contributor'} />
 
           {/* Pagination bar */}
           {totalPages > 1 && (

@@ -12,7 +12,7 @@ export default function StatusBadge({ status }) {
       case 'in_review':
       case 'review':
       case 'pending':
-        return 'In Review'
+        return 'Awaiting Review'
       default:
         return status
     }

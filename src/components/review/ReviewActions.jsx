@@ -84,7 +84,8 @@ export default function ReviewActions({ post, adminId }) {
       const { error: noteErr } = await supabase.from('review_notes').insert({
         post_id: post.id,
         author_id: adminId,
-        note: trimmed
+        note: trimmed,
+        note_type: 'reviewer_feedback'
       })
       if (noteErr) throw noteErr
 

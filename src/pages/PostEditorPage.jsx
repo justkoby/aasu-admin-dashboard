@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useNavigate, useLocation } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import * as z from 'zod'
@@ -8,7 +8,8 @@ import { supabase } from '../lib/supabaseClient'
 import { createSlug } from '../utils/createSlug'
 import RichTextEditor from '../components/posts/RichTextEditor'
 import FeaturedImageUploader from '../components/posts/FeaturedImageUploader'
-import { ArrowLeft, Save, Sparkles, CheckCircle2, AlertTriangle, FileCheck, MessageSquareText, ChevronDown, ChevronUp } from 'lucide-react'
+import SubmissionModal from '../components/posts/SubmissionModal'
+import { ArrowLeft, Save, Sparkles, CheckCircle2, AlertTriangle, FileCheck, MessageSquareText, ChevronDown, ChevronUp, Lock } from 'lucide-react'
 import '../styles/posts.css'
 
 // Form Zod Validation Schema
@@ -43,6 +44,7 @@ export default function PostEditorPage() {
   const { id } = useParams() // For editing posts
   const isEditMode = !!id
   const navigate = useNavigate()
+  const location = useLocation()
   const { user, profile, loading: authLoading } = useAuth()
   const userRole = profile?.role || 'contributor'
 
@@ -54,6 +56,9 @@ export default function PostEditorPage() {
   const [reviewNotes, setReviewNotes] = useState([])
   // Collapsible older-notes history inside the feedback panel
   const [showFeedbackHistory, setShowFeedbackHistory] = useState(false)
+  // Contributor submission confirmation modal (optional note to the reviewer)
+  const [pendingSubmission, setPendingSubmission] = useState(null)
+  const [submissionNote, setSubmissionNote] = useState('')
   
   const [isLoading, setIsLoading] = useState(isEditMode)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -101,6 +106,15 @@ export default function PostEditorPage() {
     window.addEventListener('beforeunload', handleBeforeUnload)
     return () => window.removeEventListener('beforeunload', handleBeforeUnload)
   }, [isDirty])
+
+  // Surface cross-page notifications once (e.g. partial submission warning)
+  useEffect(() => {
+    const state = location.state
+    if (state?.message) {
+      setSaveStatus({ type: state.type || 'success', message: state.message })
+      window.history.replaceState(null, '')
+    }
+  }, [location.state])
 
   // Fetch categories on mount
   useEffect(() => {
@@ -204,7 +218,13 @@ export default function PostEditorPage() {
             }
 
             if (!notesResult.error && isMounted) {
-              setReviewNotes(notesResult.data || [])
+              // The "Changes Requested" panel shows reviewer feedback only —
+              // contributor submission notes live in the editorial conversation.
+              setReviewNotes(
+                (notesResult.data || []).filter(
+                  (n) => (n.note_type || 'reviewer_feedback') === 'reviewer_feedback'
+                )
+              )
             }
           } catch (notesErr) {
             console.warn('Could not load review notes for the editor:', notesErr)
@@ -278,8 +298,25 @@ export default function PostEditorPage() {
     return 'Administrator'
   }
 
+  // Structured diagnostics for Supabase save failures.
+  // Logs the exact failing operation plus the full error object
+  // (code, message, details, hint) so constraint/RLS violations are never hidden.
+  const logSaveError = (operation, err, payload = null) => {
+    console.error('[AASU CMS] Post save operation failed.', {
+      operation,
+      code: err?.code ?? null,
+      message: err?.message ?? null,
+      details: err?.details ?? null,
+      hint: err?.hint ?? null,
+      error: err
+    })
+    if (import.meta.env.DEV && payload) {
+      console.error('[AASU CMS] Payload sent with the failing operation:', payload)
+    }
+  }
+
   // Common Post Saving Logic
-  const handleSavePost = async (formValues, statusAction) => {
+  const handleSavePost = async (formValues, statusAction, contributorNote = null) => {
     setIsSubmitting(true)
     setSaveStatus(null)
 
@@ -293,7 +330,10 @@ export default function PostEditorPage() {
       }
       
       const { data: duplicatePost, error: checkErr } = await query.maybeSingle()
-      if (checkErr) throw checkErr
+      if (checkErr) {
+        logSaveError('posts.select (slug collision check)', checkErr, { slug: currentSlug })
+        throw checkErr
+      }
 
       if (duplicatePost) {
         throw new Error(
@@ -301,8 +341,16 @@ export default function PostEditorPage() {
         )
       }
 
+      // Resolve the live authenticated Supabase Auth user once per save attempt.
+      // Never use profile email/name, cached localStorage IDs or another user's ID.
+      const { data: authSession } = await supabase.auth.getSession()
+      const authenticatedUser = authSession?.session?.user || user
+      if (!authenticatedUser?.id) {
+        throw new Error('Your session has expired. Please sign in again to save posts.')
+      }
+
       // 2. Build Database columns payload — all enum fields must be exact lowercase PostgreSQL values
-      const payload = {
+      const contentFields = {
         title: formValues.title,
         slug: currentSlug,
         excerpt: formValues.excerpt,
@@ -317,46 +365,149 @@ export default function PostEditorPage() {
         seo_description: formValues.seo_description || null
       }
 
-      // Administrator controls — hero_position is a lowercase enum: none | primary | secondary
-      if (userRole === 'super_admin' || userRole === 'communications_admin') {
-        // Default to 'none' if not set; form already stores lowercase values
-        payload.hero_position = formValues.hero_position || 'none'
-        payload.featured_until = formValues.featured_until || null
-      }
+      const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
 
-      // Status-specific updates — all status values are lowercase enums
-      if (statusAction === 'publish') {
-        payload.status = 'published'
-        // Preserve original published_at if it already exists
-        payload.published_at = originalPost?.published_at || new Date().toISOString()
-      } else if (statusAction === 'submit') {
-        payload.status = 'in_review'
-        payload.submitted_at = new Date().toISOString()
-      } else {
-        // draft — default save action
-        payload.status = 'draft'
-      }
-
-      // Author constraints
+      let payload
       if (!isEditMode) {
-        payload.author_id = user.id
-      } else {
-        // Preserve original author
-        payload.author_id = originalPost.author_id
-      }
+        // Explicit lifecycle values for every new post, regardless of role
+        payload = {
+          ...contentFields,
+          author_id: authenticatedUser.id,
+          status: 'draft',
+          hero_position: 'none',
+          featured_until: null,
+          published_at: null,
+          submitted_at: null,
+          scheduled_for: null,
+          reviewed_by: null,
+          reviewed_at: null
+        }
 
+        if (isAdminRole) {
+          // Homepage settings only when the interface supplies them; empty featured_until -> null
+          payload.hero_position = formValues.hero_position || 'none'
+          payload.featured_until = formValues.featured_until || null
+          // Administrator status transitions on creation
+          if (statusAction === 'publish') {
+            payload.status = 'published'
+            payload.published_at = new Date().toISOString()
+          } else if (statusAction === 'submit') {
+            payload.status = 'in_review'
+            payload.submitted_at = new Date().toISOString()
+          }
+        }
+        // Contributors: status stays forced to 'draft', hero_position to 'none'.
+
+        // Guard: the post author must equal the authenticated Supabase Auth user
+        if (payload.author_id !== authenticatedUser.id) {
+          throw new Error('Author verification failed. The post author must be the signed-in user.')
+        }
+
+        // Remove undefined values but preserve explicit null lifecycle values
+        payload = Object.fromEntries(
+          Object.entries(payload).filter(([, value]) => value !== undefined)
+        )
+
+        if (import.meta.env.DEV) {
+          // Sanitized insert payload — contains no tokens or session secrets
+          console.info('[AASU CMS] Sanitized insert payload:', payload)
+        }
+      } else {
+        // Edit mode — contributors may only update their own posts
+        if (!isAdminRole && originalPost.author_id !== authenticatedUser.id) {
+          throw new Error('Author verification failed. You can only update your own posts.')
+        }
+
+        // Preserve the original author and untouched lifecycle columns
+        payload = {
+          ...contentFields,
+          author_id: originalPost.author_id
+        }
+
+        // Administrator controls — hero_position is a lowercase enum: none | primary | secondary
+        if (isAdminRole) {
+          // Default to 'none' if not set; form already stores lowercase values
+          payload.hero_position = formValues.hero_position || 'none'
+          payload.featured_until = formValues.featured_until || null
+        }
+
+        // Status-specific updates — all status values are lowercase enums
+        if (statusAction === 'publish') {
+          payload.status = 'published'
+          // Preserve original published_at if it already exists
+          payload.published_at = originalPost?.published_at || new Date().toISOString()
+        } else if (statusAction === 'submit' && isAdminRole) {
+          payload.status = 'in_review'
+          payload.submitted_at = new Date().toISOString()
+        } else {
+          // draft — default save action. Contributor resubmissions save the
+          // revision as draft first; the in_review transition follows below.
+          payload.status = 'draft'
+        }
+      }
       // 3. Upsert Post Record
+      const isContributorSubmit = !isAdminRole && statusAction === 'submit'
       let savedPost = null
+      let submissionFailedAfterDraft = false
       if (isEditMode) {
-        const { data, error: updateErr } = await supabase
-          .from('posts')
-          .update(payload)
-          .eq('id', id)
-          .select()
-          .single()
-        
-        if (updateErr) throw updateErr
+        // Contributors must target both the post ID and their own author_id
+        let updateQuery = supabase.from('posts').update(payload).eq('id', id)
+        if (!isAdminRole) {
+          updateQuery = updateQuery.eq('author_id', authenticatedUser.id)
+        }
+        const { data, error: updateErr } = await updateQuery.select().single()
+
+        if (updateErr) {
+          // Exact posts.update failure — never hidden from the console
+          console.error({
+            code: updateErr.code,
+            message: updateErr.message,
+            details: updateErr.details,
+            hint: updateErr.hint,
+            payload,
+            authenticatedUserId: authenticatedUser?.id ?? null,
+            existingPostAuthorId: originalPost?.author_id ?? null,
+            existingPostStatus: originalPost?.status ?? null
+          })
+          throw updateErr
+        }
         savedPost = data
+
+        // Contributor resubmission: the revision is saved as draft first, then
+        // the post is transitioned to in_review as a separate update.
+        if (isContributorSubmit) {
+          const submissionUpdate = {
+            status: 'in_review',
+            submitted_at: new Date().toISOString(),
+            hero_position: 'none',
+            published_at: null,
+            reviewed_by: null,
+            reviewed_at: null
+          }
+          const { data: submittedData, error: submitUpdateErr } = await supabase
+            .from('posts')
+            .update(submissionUpdate)
+            .eq('id', id)
+            .eq('author_id', authenticatedUser.id)
+            .select()
+            .single()
+
+          if (submitUpdateErr) {
+            console.error({
+              code: submitUpdateErr.code,
+              message: submitUpdateErr.message,
+              details: submitUpdateErr.details,
+              hint: submitUpdateErr.hint,
+              payload: submissionUpdate,
+              authenticatedUserId: authenticatedUser.id,
+              existingPostAuthorId: originalPost?.author_id ?? null,
+              existingPostStatus: originalPost?.status ?? null
+            })
+            submissionFailedAfterDraft = true
+          } else {
+            savedPost = submittedData
+          }
+        }
       } else {
         const { data, error: insertErr } = await supabase
           .from('posts')
@@ -364,8 +515,81 @@ export default function PostEditorPage() {
           .select()
           .single()
         
-        if (insertErr) throw insertErr
+        if (insertErr) {
+          // Complete Supabase error for the failing insert — never hidden from the console
+          console.error({
+            code: insertErr.code,
+            message: insertErr.message,
+            details: insertErr.details,
+            hint: insertErr.hint,
+            payload
+          })
+          throw insertErr
+        }
         savedPost = data
+      }
+
+      // Two-step contributor submission on initial creation: the insert lands as a
+      // draft first, then the new post is immediately moved to in_review.
+      if (!isEditMode && isContributorSubmit) {
+        const submissionUpdate = {
+          status: 'in_review',
+          submitted_at: new Date().toISOString()
+        }
+        const { error: submitUpdateErr } = await supabase
+          .from('posts')
+          .update(submissionUpdate)
+          .eq('id', savedPost.id)
+          .eq('author_id', authenticatedUser.id)
+
+        if (submitUpdateErr) {
+          console.error({
+            code: submitUpdateErr.code,
+            message: submitUpdateErr.message,
+            details: submitUpdateErr.details,
+            hint: submitUpdateErr.hint,
+            payload: submissionUpdate,
+            authenticatedUserId: authenticatedUser.id,
+            existingPostAuthorId: authenticatedUser.id,
+            existingPostStatus: 'draft'
+          })
+          submissionFailedAfterDraft = true
+        }
+      }
+
+      // Optional contributor submission note — never empty, never duplicated
+      let noteFailed = false
+      const trimmedSubmissionNote = (contributorNote || '').trim()
+      if (isContributorSubmit && !submissionFailedAfterDraft && trimmedSubmissionNote) {
+        try {
+          // Duplicate guard so retries never attach the same note twice
+          const { data: existingNote } = await supabase
+            .from('review_notes')
+            .select('id')
+            .eq('post_id', savedPost.id)
+            .eq('author_id', authenticatedUser.id)
+            .eq('note_type', 'contributor_note')
+            .eq('note', trimmedSubmissionNote)
+            .maybeSingle()
+
+          if (!existingNote) {
+            const { error: noteErr } = await supabase.from('review_notes').insert({
+              post_id: savedPost.id,
+              author_id: authenticatedUser.id,
+              note: trimmedSubmissionNote,
+              note_type: 'contributor_note'
+            })
+            if (noteErr) throw noteErr
+          }
+        } catch (noteErr) {
+          console.error('[AASU CMS] Contributor submission note could not be attached.', {
+            code: noteErr?.code ?? null,
+            message: noteErr?.message ?? null,
+            details: noteErr?.details ?? null,
+            hint: noteErr?.hint ?? null
+          })
+          noteFailed = true
+        }
       }
 
       // 4. Save Category Assignments safely (do not fail post save if categories mapping fails)
@@ -389,22 +613,36 @@ export default function PostEditorPage() {
           if (mapErr) throw mapErr
         }
       } catch (catErr) {
-        console.error('Failed to link category assignments:', catErr)
+        logSaveError('post_categories.delete/insert (category assignment)', catErr, {
+          post_id: savedPost?.id ?? null,
+          category_ids: selectedCategoryIds
+        })
         categoryAssignmentSuccess = false
       }
 
       // 5. Report save state
-      if (!categoryAssignmentSuccess) {
+      if (submissionFailedAfterDraft) {
+        // The draft exists — continue on its edit page so retrying never duplicates the post
+        navigate(`/dashboard/posts/${savedPost.id}/edit`, {
+          state: {
+            type: 'warning',
+            message: 'Your post was saved as a draft, but it could not be submitted for review.'
+          }
+        })
+      } else if (!categoryAssignmentSuccess) {
         setSaveStatus({
           type: 'warning',
           message: 'Post saved successfully, but category assignment failed. Please open the post again to re-apply categories.'
         })
-      } else if (statusAction === 'submit' && reviewNotes.length > 0) {
-        // Resubmission of a revised draft — confirm on the Review Feedback page
-        navigate('/dashboard/review', {
-          state: {
-            message: `"${formValues.title || 'The revised post'}" was sent back for review. The editorial team will take another look.`
-          }
+      } else if (isContributorSubmit) {
+        // Contributor submission confirmed — back to My Posts with the notice
+        navigate('/dashboard/posts', {
+          state: noteFailed
+            ? {
+                type: 'warning',
+                message: 'Your post was submitted, but the note could not be attached.'
+              }
+            : { type: 'success', message: 'Submitted for review successfully' }
         })
       } else {
         // Success -> redirect
@@ -439,9 +677,23 @@ export default function PostEditorPage() {
     await handleSavePost(formValues, 'draft')
   }
 
-  // Handler for Submit Review
+  // Handler for Submit Review — contributors confirm via a modal with an
+  // optional note; administrators submit directly.
   const onSubmitReview = async (formValues) => {
-    await handleSavePost(formValues, 'submit')
+    const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
+    if (isAdminRole) {
+      await handleSavePost(formValues, 'submit')
+      return
+    }
+    setSubmissionNote('')
+    setPendingSubmission(formValues)
+  }
+
+  // Modal confirmation — runs the submission flow with the optional note
+  const handleConfirmSubmission = async () => {
+    const formValues = pendingSubmission
+    setPendingSubmission(null)
+    await handleSavePost(formValues, 'submit', submissionNote)
   }
 
   // Handler for Publish (requires Admin credentials and confirm dialog)
@@ -465,6 +717,38 @@ export default function PostEditorPage() {
   }
 
   const isAdmin = userRole === 'super_admin' || userRole === 'communications_admin'
+
+  // Contributors cannot modify a post while it awaits editorial review
+  if (isEditMode && !isAdmin && originalPost?.status === 'in_review') {
+    return (
+      <div className="dashboard-content-wrapper">
+        <div
+          className="editor-card"
+          style={{ maxWidth: '640px', margin: '40px auto', padding: '40px 32px', textAlign: 'center' }}
+        >
+          <Lock size={40} style={{ color: 'var(--posts-red)', marginBottom: '16px' }} />
+          <h2 style={{ fontSize: '22px', fontWeight: 800, color: 'var(--dash-navy)', marginBottom: '8px' }}>
+            Awaiting Review
+          </h2>
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--dash-text-secondary)',
+              lineHeight: 1.6,
+              marginBottom: '24px'
+            }}
+          >
+            This post has been submitted for review and is locked for editing. You will be able
+            to revise it again once an administrator returns it to draft.
+          </p>
+          <button type="button" className="edit-action-btn" onClick={() => navigate('/dashboard/posts')}>
+            <ArrowLeft size={14} />
+            <span>Back to My Posts</span>
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="dashboard-content-wrapper">
@@ -816,7 +1100,7 @@ export default function PostEditorPage() {
                 <span>Save Draft</span>
               </button>
 
-              {/* Submit for Review */}
+              {/* Submit for Review — contributor creation uses two-step draft insert + in_review update */}
               <button
                 type="button"
                 onClick={handleSubmit(onSubmitReview)}
@@ -854,6 +1138,17 @@ export default function PostEditorPage() {
           </div>
         </div>
       </form>
+
+      {/* Contributor submission confirmation modal (optional note to reviewer) */}
+      {pendingSubmission && (
+        <SubmissionModal
+          note={submissionNote}
+          onNoteChange={setSubmissionNote}
+          onCancel={() => setPendingSubmission(null)}
+          onConfirm={handleConfirmSubmission}
+          isSubmitting={isSubmitting}
+        />
+      )}
     </div>
   )
 }

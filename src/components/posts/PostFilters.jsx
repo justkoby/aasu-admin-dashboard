@@ -34,7 +34,7 @@ export default function PostFilters({ filters, onFilterChange, categories }) {
         >
           <option value="">All Statuses</option>
           <option value="draft">Draft</option>
-          <option value="in_review">In Review</option>
+          <option value="in_review">Awaiting Review</option>
           <option value="published">Published</option>
         </select>
       </div>
