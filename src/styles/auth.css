@@ -1,0 +1,723 @@
+/* AASU Admin Dashboard Authentication Stylesheet */
+
+:root {
+  --aasu-navy: #0A192F;
+  --aasu-navy-light: #172A45;
+  --aasu-gold: #C5A059;
+  --aasu-gold-hover: #B08D46;
+  --aasu-green: #1E5E3A;
+  --aasu-green-light: #E8F5E9;
+  --aasu-white: #FFFFFF;
+  --aasu-gray-bg: #F8F9FA;
+  --aasu-gray-border: #E2E8F0;
+  --aasu-text-primary: #1E293B;
+  --aasu-text-secondary: #64748B;
+  --aasu-error-red: #D32F2F;
+  --aasu-error-bg: #FFEAEA;
+  --aasu-font-sans: 'Inter', system-ui, -apple-system, sans-serif;
+  --transition-smooth: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+  --shadow-premium: 0 20px 25px -5px rgba(0, 0, 0, 0.1), 0 10px 10px -5px rgba(0, 0, 0, 0.04);
+}
+
+/* ==========================================================================
+   Page Loader / Auth Loader
+   ========================================================================== */
+.auth-loader-container {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  background-color: var(--aasu-navy);
+  color: var(--aasu-white);
+  font-family: var(--aasu-font-sans);
+}
+
+.auth-loader {
+  width: 50px;
+  height: 50px;
+  border: 4px solid rgba(255, 255, 255, 0.1);
+  border-left-color: var(--aasu-gold);
+  border-radius: 50%;
+  animation: auth-spin 1s linear infinite;
+  margin-bottom: 20px;
+}
+
+@keyframes auth-spin {
+  to { transform: rotate(360deg); }
+}
+
+.auth-loader-container p {
+  font-size: 16px;
+  font-weight: 500;
+  letter-spacing: 0.5px;
+  color: var(--aasu-gold);
+  margin: 0;
+}
+
+/* ==========================================================================
+   Login Split Layout
+   ========================================================================== */
+.login-container {
+  display: grid;
+  grid-template-columns: 1.1fr 0.9fr;
+  min-height: 100vh;
+  width: 100%;
+  max-width: 100% !important; /* Overriding index.css max-width constraint for page */
+  font-family: var(--aasu-font-sans);
+  background-color: var(--aasu-white);
+  box-sizing: border-box;
+}
+
+/* Override #root from default project template so the layout takes full page */
+#root:has(.login-container),
+#root:has(.dashboard-container) {
+  width: 100% !important;
+  max-width: 100% !important;
+  margin: 0 !important;
+  border: none !important;
+}
+
+/* Left Panel - Brand Identity */
+.login-left-panel {
+  position: relative;
+  background-color: var(--aasu-navy);
+  color: var(--aasu-white);
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  padding: 80px;
+  overflow: hidden;
+  text-align: left;
+}
+
+/* African-Inspired Geometric Background Pattern Overlay */
+.african-pattern-overlay {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  opacity: 0.07;
+  pointer-events: none;
+  background-image: 
+    radial-gradient(circle at 10% 20%, var(--aasu-gold) 2px, transparent 4px),
+    radial-gradient(circle at 90% 80%, var(--aasu-gold) 2px, transparent 4px),
+    linear-gradient(45deg, var(--aasu-gold) 25%, transparent 25%),
+    linear-gradient(-45deg, var(--aasu-gold) 25%, transparent 25%),
+    linear-gradient(135deg, var(--aasu-gold) 25%, transparent 25%),
+    linear-gradient(-135deg, var(--aasu-gold) 25%, transparent 25%);
+  background-size: 60px 60px;
+}
+
+.login-left-content {
+  position: relative;
+  z-index: 2;
+  max-width: 580px;
+}
+
+.brand-badge {
+  display: inline-block;
+  background-color: var(--aasu-green);
+  color: var(--aasu-white);
+  padding: 6px 14px;
+  font-size: 13px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 1.5px;
+  border-radius: 4px;
+  margin-bottom: 24px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.brand-headline {
+  font-size: 38px;
+  font-weight: 800;
+  line-height: 1.2;
+  color: var(--aasu-white);
+  margin: 0 0 12px 0;
+  letter-spacing: -0.5px;
+}
+
+.brand-subheadline {
+  font-size: 16px;
+  font-weight: 500;
+  color: var(--aasu-gold);
+  margin: 0 0 28px 0;
+  letter-spacing: 0.5px;
+}
+
+.brand-welcome {
+  font-size: 15px;
+  line-height: 1.6;
+  color: rgba(255, 255, 255, 0.8);
+  margin: 0 0 40px 0;
+}
+
+.brand-accent-line {
+  width: 80px;
+  height: 4px;
+  background: linear-gradient(90deg, var(--aasu-gold) 0%, var(--aasu-green) 100%);
+  border-radius: 2px;
+}
+
+/* Right Panel - Form Container */
+.login-right-panel {
+  display: flex;
+  flex-direction: column;
+  justify-content: center;
+  align-items: center;
+  padding: 40px;
+  background-color: var(--aasu-white);
+}
+
+.login-form-wrapper {
+  width: 100%;
+  max-width: 420px;
+  display: flex;
+  flex-direction: column;
+}
+
+.login-form-header {
+  text-align: center;
+  margin-bottom: 32px;
+}
+
+.login-logo {
+  height: 72px;
+  width: auto;
+  margin-bottom: 20px;
+  object-fit: contain;
+}
+
+.login-form-header h1 {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--aasu-navy);
+  margin: 0 0 8px 0;
+  letter-spacing: -0.5px;
+}
+
+.login-form-header p {
+  font-size: 14px;
+  color: var(--aasu-text-secondary);
+  margin: 0;
+}
+
+/* ==========================================================================
+   Form Styling
+   ========================================================================== */
+.login-form {
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  text-align: left;
+}
+
+.form-group label {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--aasu-navy-light);
+}
+
+.form-group input[type="email"],
+.form-group input[type="password"] {
+  width: 100%;
+  padding: 12px 16px;
+  font-size: 15px;
+  font-family: var(--aasu-font-sans);
+  border: 1px solid var(--aasu-gray-border);
+  border-radius: 6px;
+  box-sizing: border-box;
+  background-color: var(--aasu-gray-bg);
+  color: var(--aasu-text-primary);
+  transition: var(--transition-smooth);
+}
+
+.form-group input:focus {
+  outline: none;
+  border-color: var(--aasu-gold);
+  background-color: var(--aasu-white);
+  box-shadow: 0 0 0 3px rgba(197, 160, 89, 0.15);
+}
+
+/* Password Input with Show/Hide */
+.password-label-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.forgot-password-link {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--aasu-gold);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0;
+  transition: var(--transition-smooth);
+}
+
+.forgot-password-link:hover {
+  color: var(--aasu-gold-hover);
+  text-decoration: underline;
+}
+
+.password-input-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+  width: 100%;
+}
+
+.password-input-wrapper input {
+  padding-right: 48px !important;
+}
+
+.password-toggle {
+  position: absolute;
+  right: 12px;
+  background: none;
+  border: none;
+  color: var(--aasu-text-secondary);
+  cursor: pointer;
+  padding: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: var(--transition-smooth);
+}
+
+.password-toggle:hover {
+  color: var(--aasu-navy);
+}
+
+.password-toggle:focus-visible {
+  outline: 2px solid var(--aasu-gold);
+  border-radius: 4px;
+}
+
+/* Remember Me Checkbox */
+.form-options {
+  display: flex;
+  justify-content: flex-start;
+  margin-top: -4px;
+}
+
+.remember-me-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 14px;
+  color: var(--aasu-text-secondary);
+  cursor: pointer;
+  user-select: none;
+  font-weight: 500;
+}
+
+.remember-me-label input[type="checkbox"] {
+  width: 17px;
+  height: 17px;
+  cursor: pointer;
+  accent-color: var(--aasu-gold);
+}
+
+/* Submit Button & Loader */
+.signin-button {
+  width: 100%;
+  padding: 14px;
+  font-size: 16px;
+  font-weight: 600;
+  font-family: var(--aasu-font-sans);
+  background-color: var(--aasu-navy);
+  color: var(--aasu-white);
+  border: 1px solid var(--aasu-navy);
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  transition: var(--transition-smooth);
+}
+
+.signin-button:hover:not(:disabled) {
+  background-color: var(--aasu-navy-light);
+  border-color: var(--aasu-navy-light);
+  box-shadow: 0 4px 12px rgba(10, 25, 47, 0.15);
+}
+
+.signin-button:focus {
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(10, 25, 47, 0.25);
+}
+
+.signin-button:disabled {
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.signin-button.loading .spinner {
+  display: inline-block;
+  width: 18px;
+  height: 18px;
+  border: 2px solid rgba(255, 255, 255, 0.3);
+  border-top-color: var(--aasu-white);
+  border-radius: 50%;
+  animation: auth-spin 0.6s linear infinite;
+}
+
+/* Error Alerts */
+.error-alert {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  background-color: var(--aasu-error-bg);
+  border-left: 4px solid var(--aasu-error-red);
+  padding: 12px 16px;
+  border-radius: 4px;
+  margin-bottom: 24px;
+  text-align: left;
+}
+
+.error-icon {
+  width: 20px;
+  height: 20px;
+  color: var(--aasu-error-red);
+  flex-shrink: 0;
+  margin-top: 1px;
+}
+
+.error-message {
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1.4;
+  color: var(--aasu-error-red);
+}
+
+.login-form-footer {
+  margin-top: 40px;
+  text-align: center;
+}
+
+.login-form-footer p {
+  font-size: 12px;
+  color: var(--aasu-text-secondary);
+  margin: 0;
+}
+
+/* ==========================================================================
+   Dashboard Page Styling (Premium Minimalist Dashboard)
+   ========================================================================== */
+.dashboard-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+  background-color: var(--aasu-gray-bg);
+  color: var(--aasu-text-primary);
+  font-family: var(--aasu-font-sans);
+}
+
+.dashboard-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  background-color: var(--aasu-navy);
+  color: var(--aasu-white);
+  padding: 16px 40px;
+  border-bottom: 3px solid var(--aasu-gold);
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.08);
+}
+
+.header-logo-section {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.dashboard-header-logo {
+  height: 40px;
+  width: auto;
+  object-fit: contain;
+}
+
+.header-title {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.5px;
+}
+
+.logout-button-header {
+  background-color: transparent;
+  color: var(--aasu-white);
+  border: 1px solid rgba(255, 255, 255, 0.3);
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.logout-button-header:hover {
+  background-color: var(--aasu-gold);
+  border-color: var(--aasu-gold);
+  color: var(--aasu-navy);
+}
+
+.dashboard-main {
+  flex-grow: 1;
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  padding: 60px 20px;
+}
+
+.dashboard-card {
+  background-color: var(--aasu-white);
+  border-radius: 12px;
+  box-shadow: var(--shadow-premium);
+  border: 1px solid var(--aasu-gray-border);
+  padding: 40px;
+  width: 100%;
+  max-width: 600px;
+  text-align: center;
+}
+
+.profile-badge-avatar {
+  width: 80px;
+  height: 80px;
+  border-radius: 50%;
+  background-color: var(--aasu-navy);
+  color: var(--aasu-gold);
+  font-size: 32px;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  margin: 0 auto 24px;
+  border: 3px solid var(--aasu-gold);
+  box-shadow: 0 4px 6px rgba(0, 0, 0, 0.05);
+}
+
+.welcome-text {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--aasu-navy);
+  margin: 0 0 6px 0;
+  letter-spacing: -0.5px;
+}
+
+.dashboard-subtitle {
+  font-size: 14px;
+  color: var(--aasu-text-secondary);
+  margin: 0 0 32px 0;
+}
+
+.profile-details-grid {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 16px;
+  background-color: var(--aasu-gray-bg);
+  padding: 24px;
+  border-radius: 8px;
+  border: 1px solid var(--aasu-gray-border);
+  margin-bottom: 28px;
+  text-align: left;
+}
+
+.detail-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding-bottom: 12px;
+  border-bottom: 1px solid rgba(226, 232, 240, 0.6);
+}
+
+.detail-item:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+
+.detail-label {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--aasu-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.detail-value {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--aasu-text-primary);
+}
+
+.role-badge {
+  background-color: var(--aasu-navy-light);
+  color: var(--aasu-gold);
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+  border: 1px solid var(--aasu-gold);
+}
+
+.status-badge {
+  padding: 4px 10px;
+  border-radius: 20px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.status-badge.active {
+  background-color: var(--aasu-green-light);
+  color: var(--aasu-green);
+  border: 1px solid rgba(30, 94, 58, 0.2);
+}
+
+/* Database / CMS Status connection banner */
+.cms-status-indicator {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  background-color: var(--aasu-green-light);
+  border: 1px solid rgba(30, 94, 58, 0.15);
+  border-radius: 6px;
+  padding: 12px 16px;
+  margin-bottom: 32px;
+}
+
+.status-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background-color: var(--aasu-green);
+}
+
+.status-dot.pulsing {
+  box-shadow: 0 0 0 0 rgba(30, 94, 58, 0.4);
+  animation: pulse-green 2s infinite;
+}
+
+@keyframes pulse-green {
+  0% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(30, 94, 58, 0.7);
+  }
+  70% {
+    transform: scale(1);
+    box-shadow: 0 0 0 6px rgba(30, 94, 58, 0);
+  }
+  100% {
+    transform: scale(0.95);
+    box-shadow: 0 0 0 0 rgba(30, 94, 58, 0);
+  }
+}
+
+.status-text {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--aasu-green);
+}
+
+.dashboard-actions {
+  display: flex;
+  justify-content: center;
+}
+
+.logout-button-main {
+  padding: 12px 30px;
+  font-size: 15px;
+  font-weight: 600;
+  font-family: var(--aasu-font-sans);
+  background-color: transparent;
+  color: var(--aasu-navy);
+  border: 1.5px solid var(--aasu-navy);
+  border-radius: 6px;
+  cursor: pointer;
+  transition: var(--transition-smooth);
+}
+
+.logout-button-main:hover {
+  background-color: var(--aasu-navy);
+  color: var(--aasu-white);
+}
+
+.dashboard-footer {
+  background-color: var(--aasu-white);
+  border-top: 1px solid var(--aasu-gray-border);
+  padding: 20px 40px;
+  text-align: center;
+}
+
+.dashboard-footer p {
+  font-size: 12px;
+  color: var(--aasu-text-secondary);
+  margin: 0;
+}
+
+/* ==========================================================================
+   Responsive Queries
+   ========================================================================== */
+@media (max-width: 900px) {
+  .login-container {
+    grid-template-columns: 1fr; /* Single column layout for mobile/tablets */
+  }
+
+  .login-left-panel {
+    display: none; /* Hide the Left Panel completely on mobile */
+  }
+
+  .login-right-panel {
+    padding: 30px 20px;
+  }
+
+  .login-form-wrapper {
+    max-width: 100%;
+    background-color: var(--aasu-white);
+    border: 1px solid var(--aasu-gray-border);
+    padding: 30px 24px;
+    border-radius: 10px;
+    box-shadow: var(--shadow-premium);
+  }
+}
+
+@media (max-width: 600px) {
+  .dashboard-header {
+    padding: 16px 20px;
+    flex-direction: column;
+    gap: 12px;
+    text-align: center;
+  }
+
+  .dashboard-main {
+    padding: 30px 16px;
+  }
+
+  .dashboard-card {
+    padding: 24px 16px;
+  }
+
+  .profile-details-grid {
+    padding: 16px;
+  }
+
+  .detail-item {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+  
+  .detail-value {
+    word-break: break-all;
+  }
+}
