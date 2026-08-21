@@ -1,13 +1,32 @@
 import React, { useState, useRef, useEffect } from 'react'
 import { useAuth } from '../../context/AuthContext'
-import { useNavigate } from 'react-router-dom'
+import { useNavigate, useLocation } from 'react-router-dom'
 import { Menu, ChevronDown, User, LogOut, Settings } from 'lucide-react'
 
 export default function DashboardHeader({ onMenuToggle }) {
   const { profile, signOut } = useAuth()
   const navigate = useNavigate()
+  const location = useLocation()
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef(null)
+
+  // Map header title based on current route
+  const getHeaderTitle = () => {
+    const path = location.pathname
+    if (path === '/dashboard' || path === '/dashboard/') {
+      return 'Dashboard Overview'
+    }
+    if (path === '/dashboard/posts') {
+      return 'All Posts'
+    }
+    if (path === '/dashboard/posts/new') {
+      return 'Add New Post'
+    }
+    if (path.startsWith('/dashboard/posts/') && path.endsWith('/edit')) {
+      return 'Edit Post'
+    }
+    return 'Dashboard Overview'
+  }
 
   // Format role for humans
   const formatRole = (roleString) => {
@@ -54,7 +73,7 @@ export default function DashboardHeader({ onMenuToggle }) {
         >
           <Menu size={24} />
         </button>
-        <h1 className="header-page-title">Dashboard Overview</h1>
+        <h1 className="header-page-title">{getHeaderTitle()}</h1>
       </div>
 
       <div className="header-right-group">

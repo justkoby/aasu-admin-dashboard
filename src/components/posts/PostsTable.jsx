@@ -1,0 +1,174 @@
+import React from 'react'
+import { Link } from 'react-router-dom'
+import StatusBadge from './StatusBadge'
+import { Edit } from 'lucide-react'
+
+export default function PostsTable({ posts }) {
+  const formatDate = (dateStr) => {
+    if (!dateStr) return '-'
+    try {
+      const date = new Date(dateStr)
+      if (isNaN(date.getTime())) return '-'
+      return date.toLocaleDateString(undefined, {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric'
+      })
+    } catch (e) {
+      return '-'
+    }
+  }
+
+  /**
+   * Resolve the display name for a post author.
+   * Data source: `author` object joined via posts_author_id_fkey.
+   * Never exposes the raw UUID to dashboard users.
+   */
+  const resolveAuthor = (post) => {
+    const a = post.author // aliased join result
+    if (a?.full_name) return a.full_name
+    if (a?.email)     return a.email
+    return 'Unknown author'
+  }
+
+  const renderHeroBadge = (position) => {
+    const pos = (position || 'none').toLowerCase()
+    if (pos === 'primary') {
+      return <span className="badge hero-yes">Primary</span>
+    }
+    if (pos === 'secondary') {
+      return (
+        <span
+          className="badge hero-yes"
+          style={{ backgroundColor: 'var(--dash-gold-light)', color: '#926E2D' }}
+        >
+          Secondary
+        </span>
+      )
+    }
+    // 'none' or anything else — plain text, no badge
+    return <span className="hero-none-label">None</span>
+  }
+
+  const formatType = (typeStr) => {
+    if (!typeStr) return '-'
+    return typeStr
+      .split(/[_-]+|\s+/)
+      .map((word) => word.charAt(0).toUpperCase() + word.slice(1).toLowerCase())
+      .join(' ')
+  }
+
+  return (
+    <div className="posts-card-container">
+      {/* 1. Desktop Table View */}
+      <table className="posts-list-table" aria-label="CMS Posts List">
+        <thead>
+          <tr>
+            {/* Fixed/narrow columns */}
+            <th scope="col" className="post-thumbnail-cell" style={{ width: '56px', minWidth: '56px' }}>Image</th>
+            {/* Title should get as much space as possible */}
+            <th scope="col" style={{ minWidth: '220px' }}>Title</th>
+            <th scope="col" style={{ minWidth: '100px', whiteSpace: 'nowrap' }}>Type</th>
+            <th scope="col" style={{ minWidth: '130px' }}>Author</th>
+            <th scope="col" style={{ minWidth: '90px', whiteSpace: 'nowrap' }}>Status</th>
+            <th scope="col" style={{ minWidth: '96px', whiteSpace: 'nowrap' }}>Updated</th>
+            <th scope="col" style={{ minWidth: '96px', whiteSpace: 'nowrap' }}>Published</th>
+            <th scope="col" style={{ minWidth: '80px', whiteSpace: 'nowrap' }}>Hero</th>
+            <th scope="col" style={{ width: '60px' }}><span className="sr-only">Actions</span></th>
+          </tr>
+        </thead>
+        <tbody>
+          {posts.map((post) => (
+            <tr key={post.id}>
+              <td className="post-thumbnail-cell">
+                <img
+                  src={post.featured_image_url || '/aasu-logo.png'}
+                  alt={post.featured_image_alt || 'Post thumbnail'}
+                  className="post-thumbnail"
+                  onError={(e) => {
+                    e.target.src = '/aasu-logo.png'
+                  }}
+                />
+              </td>
+              <td>
+                <Link to={`/dashboard/posts/${post.id}/edit`} className="post-title-cell-bold">
+                  {post.title || 'Untitled'}
+                </Link>
+              </td>
+              <td style={{ whiteSpace: 'nowrap' }}>{formatType(post.type)}</td>
+              <td>{resolveAuthor(post)}</td>
+              <td>
+                <StatusBadge status={post.status} />
+              </td>
+              <td>{formatDate(post.updated_at || post.created_at)}</td>
+              <td>{formatDate(post.published_at)}</td>
+              <td>{renderHeroBadge(post.hero_position)}</td>
+              <td>
+                <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
+                  <Edit size={14} />
+                  <span>Edit</span>
+                </Link>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+
+      {/* 2. Mobile Responsive Grid View */}
+      <div className="posts-mobile-grid">
+        {posts.map((post) => (
+          <div className="post-mobile-card" key={post.id}>
+            <div className="post-mobile-header">
+              <img
+                src={post.featured_image_url || '/aasu-logo.png'}
+                alt={post.featured_image_alt || 'Post thumbnail'}
+                className="post-mobile-thumb"
+                onError={(e) => {
+                  e.target.src = '/aasu-logo.png'
+                }}
+              />
+              <div className="post-mobile-meta-title">
+                <span className="post-mobile-type">{formatType(post.type)}</span>
+                <Link to={`/dashboard/posts/${post.id}/edit`} className="post-mobile-title">
+                  {post.title || 'Untitled'}
+                </Link>
+              </div>
+            </div>
+
+            <div className="post-mobile-details">
+              <div className="mobile-detail-item">
+                <span className="mobile-detail-label">Author</span>
+                <span className="mobile-detail-value">{resolveAuthor(post)}</span>
+              </div>
+              <div className="mobile-detail-item">
+                <span className="mobile-detail-label">Status</span>
+                <span className="mobile-detail-value">
+                  <StatusBadge status={post.status} />
+                </span>
+              </div>
+              <div className="mobile-detail-item">
+                <span className="mobile-detail-label">Updated</span>
+                <span className="mobile-detail-value">
+                  {formatDate(post.updated_at || post.created_at)}
+                </span>
+              </div>
+              <div className="mobile-detail-item">
+                <span className="mobile-detail-label">Hero</span>
+                <span className="mobile-detail-value">
+                  {renderHeroBadge(post.hero_position)}
+                </span>
+              </div>
+            </div>
+
+            <div className="post-mobile-actions">
+              <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
+                <Edit size={14} />
+                <span>Edit Post</span>
+              </Link>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}

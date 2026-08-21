@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react'
+import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import StatCard from '../components/dashboard/StatCard'
@@ -14,6 +15,7 @@ import {
 } from 'lucide-react'
 
 export default function DashboardPage() {
+  const navigate = useNavigate()
   const { profile, loading: authLoading } = useAuth()
   const [stats, setStats] = useState({
     total: 0,
@@ -42,7 +44,7 @@ export default function DashboardPage() {
         const published = allPosts.filter((p) => p.status === 'published').length
         const drafts = allPosts.filter((p) => p.status === 'draft').length
         const review = allPosts.filter(
-          (p) => p.status === 'review' || p.status === 'pending'
+          (p) => p.status === 'in_review'
         ).length
 
         setStats({ total, published, drafts, review })
@@ -147,23 +149,28 @@ export default function DashboardPage() {
 
   const renderHeroPlacement = (post) => {
     const val =
-      post.hero_placement !== undefined
+      post.hero_position !== undefined
+        ? post.hero_position
+        : post.hero_placement !== undefined
         ? post.hero_placement
         : post.is_hero !== undefined
         ? post.is_hero
         : post.hero
     
+    if (val === 'primary' || val === 'Primary') {
+      return <span className="badge hero-yes">Primary</span>
+    }
+    if (val === 'secondary' || val === 'Secondary') {
+      return <span className="badge hero-yes" style={{ backgroundColor: 'var(--dash-gold-light)', color: '#926E2D' }}>Secondary</span>
+    }
     if (val === true || val === 'true' || val === 'Yes') {
       return <span className="badge hero-yes">Yes</span>
-    }
-    if (val && typeof val === 'string') {
-      return <span className="badge hero-yes">{val}</span>
     }
     return <span className="badge hero-no">No</span>
   }
 
   const handleCreatePost = () => {
-    alert('Create New Post module is coming next.')
+    navigate('/dashboard/posts/new')
   }
 
   // Render error screen

@@ -91,23 +91,23 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         label: 'All Posts',
         icon: <FileText size={20} className="sidebar-icon" />,
         path: '/dashboard/posts',
-        comingNext: true
+        comingNext: false
       })
     } else {
       // Contributor role
       contentItems.push({
         label: 'My Posts',
         icon: <FileText size={20} className="sidebar-icon" />,
-        path: '/dashboard/my-posts',
-        comingNext: true
+        path: '/dashboard/posts',
+        comingNext: false
       })
     }
 
     contentItems.push({
       label: 'Add New Post',
       icon: <PlusCircle size={20} className="sidebar-icon" />,
-      path: '/dashboard/add-post',
-      comingNext: true
+      path: '/dashboard/posts/new',
+      comingNext: false
     })
 
     if (userRole === 'super_admin' || userRole === 'communications_admin') {

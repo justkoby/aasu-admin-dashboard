@@ -5,6 +5,8 @@ import ProtectedRoute from './components/ProtectedRoute'
 import DashboardLayout from './layouts/DashboardLayout'
 import LoginPage from './pages/LoginPage'
 import DashboardPage from './pages/DashboardPage'
+import PostsPage from './pages/PostsPage'
+import PostEditorPage from './pages/PostEditorPage'
 
 export default function App() {
   return (
@@ -28,6 +30,11 @@ export default function App() {
           >
             {/* The main dashboard page is the index route of /dashboard */}
             <Route index element={<DashboardPage />} />
+            
+            {/* Content-Management Module routes */}
+            <Route path="posts" element={<PostsPage />} />
+            <Route path="posts/new" element={<PostEditorPage />} />
+            <Route path="posts/:id/edit" element={<PostEditorPage />} />
           </Route>
 
           {/* Fallback route - redirect back to dashboard */}
