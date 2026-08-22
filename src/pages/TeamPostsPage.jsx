@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import PostFilters from '../components/posts/PostFilters'
 import PostsTable from '../components/posts/PostsTable'
+import TrashConfirmModal from '../components/posts/TrashConfirmModal'
 import { Plus, RefreshCw, FileText, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import '../styles/posts.css'
 
@@ -34,6 +35,11 @@ export default function TeamPostsPage() {
     sortBy: 'newest'
   })
   const [searchTerm, setSearchTerm] = useState('')
+
+  // Trash handling state
+  const [postToTrash, setPostToTrash] = useState(null)
+  const [isTrashing, setIsTrashing] = useState(false)
+  const [trashError, setTrashError] = useState(null)
 
   useEffect(() => {
     const timer = setTimeout(() => {
@@ -97,8 +103,9 @@ export default function TeamPostsPage() {
         }
       }
 
-      // 2. Count query
+      // 2. Count query (excluding trashed posts)
       let countQ = supabase.from('posts').select('*', { count: 'exact', head: true })
+        .is('deleted_at', null)
         .in('author_id', authorIds)
       if (filters.search) countQ = countQ.ilike('title', `%${filters.search}%`)
       if (filters.status) countQ = countQ.eq('status', filters.status)
@@ -114,7 +121,7 @@ export default function TeamPostsPage() {
         q = withJoin
           ? q.select('*, author:profiles!posts_author_id_fkey(full_name, email), assigned_reviewer:profiles!posts_assigned_reviewer_id_fkey(full_name, email)')
           : q.select('*')
-        q = q.in('author_id', authorIds)
+        q = q.is('deleted_at', null).in('author_id', authorIds)
         if (filters.search)   q = q.ilike('title', `%${filters.search}%`)
         if (filters.status)   q = q.eq('status', filters.status)
         if (filters.type)     q = q.eq('type', filters.type)
@@ -142,6 +149,58 @@ export default function TeamPostsPage() {
       if (isMounted) setError(err)
     } finally {
       if (isMounted) setIsLoading(false)
+    }
+  }
+
+  const handleConfirmTrash = async (post) => {
+    setIsTrashing(true)
+    setTrashError(null)
+
+    try {
+      let trashedRow = null
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('trash_post', {
+        p_post_id: post.id
+      })
+
+      if (rpcErr) {
+        console.warn('trash_post RPC failed, running fallback update:', rpcErr)
+        const { data: updateData, error: updateErr } = await supabase
+          .from('posts')
+          .update({
+            status_before_delete: post.status,
+            status: 'archived',
+            deleted_at: new Date().toISOString(),
+            deleted_by: user.id,
+            hero_position: 'none',
+            featured_until: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', post.id)
+          .select('id, title')
+          .single()
+
+        if (updateErr) throw updateErr
+        trashedRow = updateData
+      } else {
+        trashedRow = rpcData
+      }
+
+      if (!trashedRow) {
+        throw new Error('No post row was updated during trash.')
+      }
+
+      setPostToTrash(null)
+      setFlash({
+        type: 'success',
+        message: `Moved ‘${post.title || 'Untitled'}’ to Trash successfully.`
+      })
+
+      await loadPosts(true)
+    } catch (err) {
+      console.error('Error moving team post to trash:', err)
+      setTrashError(err)
+    } finally {
+      setIsTrashing(false)
     }
   }
 
@@ -225,8 +284,12 @@ export default function TeamPostsPage() {
         <>
           <PostsTable
             posts={posts}
+            userRole={profile?.role}
+            userId={user?.id}
+            teamAuthorIds={authorIds || []}
             isContributor={false}
             showAssignedReviewer={true}
+            onMoveToTrash={(post) => setPostToTrash(post)}
           />
           {totalPages > 1 && (
             <div className="pagination-bar">
@@ -245,6 +308,21 @@ export default function TeamPostsPage() {
           )}
         </>
       )}
+
+      {/* Trash Confirm Modal */}
+      {postToTrash && (
+        <TrashConfirmModal
+          post={postToTrash}
+          onConfirm={handleConfirmTrash}
+          onCancel={() => {
+            setPostToTrash(null)
+            setTrashError(null)
+          }}
+          isSubmitting={isTrashing}
+          error={trashError}
+        />
+      )}
     </div>
   )
 }
+

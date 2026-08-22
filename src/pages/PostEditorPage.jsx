@@ -10,6 +10,8 @@ import FeaturedImageUploader from '../components/posts/FeaturedImageUploader'
 import PostGalleryManager from '../components/posts/PostGalleryManager'
 import RichTextEditor from '../components/posts/RichTextEditor'
 import SubmissionModal from '../components/posts/SubmissionModal'
+import TrashConfirmModal from '../components/posts/TrashConfirmModal'
+import { canTrashPost } from '../components/posts/PostActionsMenu'
 import { formatRole } from '../utils/formatRole'
 import {
   Save,
@@ -21,7 +23,8 @@ import {
   ShieldAlert,
   MessageSquareText,
   ChevronDown,
-  ChevronUp
+  ChevronUp,
+  Trash2
 } from 'lucide-react'
 import '../styles/posts.css'
 
@@ -835,6 +838,58 @@ export default function PostEditorPage() {
   const latestReviewerNote = reviewNotes.find((n) => (n.note_type || 'reviewer_feedback') === 'reviewer_feedback')
   const olderNotes = reviewNotes.slice(1)
 
+  // Trash handling state
+  const [postToTrash, setPostToTrash] = useState(null)
+  const [isTrashing, setIsTrashing] = useState(false)
+  const [trashError, setTrashError] = useState(null)
+
+  const handleConfirmTrash = async (post) => {
+    setIsTrashing(true)
+    setTrashError(null)
+    try {
+      let trashedRow = null
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('trash_post', {
+        p_post_id: post.id
+      })
+
+      if (rpcErr) {
+        console.warn('trash_post RPC fallback:', rpcErr)
+        const { data: updateData, error: updateErr } = await supabase
+          .from('posts')
+          .update({
+            status_before_delete: post.status,
+            status: 'archived',
+            deleted_at: new Date().toISOString(),
+            deleted_by: user.id,
+            hero_position: 'none',
+            featured_until: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', post.id)
+          .select('id, title')
+          .single()
+
+        if (updateErr) throw updateErr
+        trashedRow = updateData
+      } else {
+        trashedRow = rpcData
+      }
+
+      setPostToTrash(null)
+      const targetRoute = isSupervisor ? '/dashboard/team-posts' : '/dashboard/posts'
+      navigate(targetRoute, {
+        state: { type: 'success', message: `Moved ‘${post.title || 'Untitled'}’ to Trash successfully.` }
+      })
+    } catch (err) {
+      console.error('Error moving post to trash:', err)
+      setTrashError(err)
+    } finally {
+      setIsTrashing(false)
+    }
+  }
+
+  const canTrashCurrentPost = isEditMode && originalPost && canTrashPost(userRole, user?.id, originalPost, [])
+
   return (
     <div className="dashboard-content-wrapper">
       {/* Editor Header Navigation */}
@@ -1284,6 +1339,24 @@ export default function PostEditorPage() {
                     <span>{isEditMode && originalPost?.status === 'published' ? 'Publish Changes' : 'Publish Now'}</span>
                   </button>
                 )}
+
+                {/* Move to Trash Button */}
+                {canTrashCurrentPost && (
+                  <button
+                    type="button"
+                    onClick={() => setPostToTrash(originalPost)}
+                    disabled={isSubmitting}
+                    className="editor-btn danger"
+                    style={{
+                      backgroundColor: '#FEF2F2',
+                      color: '#DC2626',
+                      border: '1px solid #FCA5A5'
+                    }}
+                  >
+                    <Trash2 size={16} />
+                    <span>Move to Trash</span>
+                  </button>
+                )}
               </div>
 
               <div>
@@ -1316,6 +1389,21 @@ export default function PostEditorPage() {
           notice={saveStatus}
         />
       )}
+
+      {/* Trash confirm modal */}
+      {postToTrash && (
+        <TrashConfirmModal
+          post={postToTrash}
+          onConfirm={handleConfirmTrash}
+          onCancel={() => {
+            setPostToTrash(null)
+            setTrashError(null)
+          }}
+          isSubmitting={isTrashing}
+          error={trashError}
+        />
+      )}
     </div>
   )
 }
+

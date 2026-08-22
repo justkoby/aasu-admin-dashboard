@@ -15,7 +15,8 @@ import {
   ChevronLeft,
   ChevronRight,
   X,
-  Briefcase
+  Briefcase,
+  Trash2
 } from 'lucide-react'
 
 export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, onCloseMobile }) {
@@ -199,6 +200,14 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         badgeTitle: 'Drafts with requested changes'
       })
     }
+
+    // Trash Navigation Item (all authenticated roles)
+    contentItems.push({
+      label: 'Trash',
+      icon: <Trash2 size={20} className="sidebar-icon" />,
+      path: '/dashboard/posts/trash',
+      comingNext: false
+    })
 
     sections.push({ label: 'Content', items: contentItems })
 

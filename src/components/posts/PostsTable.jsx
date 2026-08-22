@@ -1,9 +1,18 @@
 import React from 'react'
 import { Link } from 'react-router-dom'
 import StatusBadge from './StatusBadge'
-import { Edit } from 'lucide-react'
+import PostActionsMenu from './PostActionsMenu'
 
-export default function PostsTable({ posts, isContributor = false, showAssignedReviewer = false }) {
+export default function PostsTable({
+  posts,
+  userRole = 'contributor',
+  userId = null,
+  teamAuthorIds = [],
+  isContributor = false,
+  showAssignedReviewer = false,
+  onMoveToTrash,
+  onViewPreview
+}) {
   const formatDate = (dateStr) => {
     if (!dateStr) return '-'
     try {
@@ -126,20 +135,15 @@ export default function PostsTable({ posts, isContributor = false, showAssignedR
               <td>{formatDate(post.updated_at || post.created_at)}</td>
               <td>{formatDate(post.published_at)}</td>
               <td>{renderHeroBadge(post.hero_position)}</td>
-              <td>
-                {isLocked(post) ? (
-                  <span
-                    className="badge status-review"
-                    title="Editing is locked while the post is awaiting review"
-                  >
-                    Locked
-                  </span>
-                ) : (
-                  <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
-                    <Edit size={14} />
-                    <span>Edit</span>
-                  </Link>
-                )}
+              <td style={{ textAlign: 'right' }}>
+                <PostActionsMenu
+                  post={post}
+                  userRole={userRole}
+                  userId={userId}
+                  teamAuthorIds={teamAuthorIds}
+                  onMoveToTrash={onMoveToTrash}
+                  onViewPreview={onViewPreview}
+                />
               </td>
             </tr>
           ))}
@@ -201,19 +205,14 @@ export default function PostsTable({ posts, isContributor = false, showAssignedR
             </div>
 
             <div className="post-mobile-actions">
-              {isLocked(post) ? (
-                <span
-                  className="badge status-review"
-                  title="Editing is locked while the post is awaiting review"
-                >
-                  Locked
-                </span>
-              ) : (
-                <Link to={`/dashboard/posts/${post.id}/edit`} className="edit-action-btn">
-                  <Edit size={14} />
-                  <span>Edit Post</span>
-                </Link>
-              )}
+              <PostActionsMenu
+                post={post}
+                userRole={userRole}
+                userId={userId}
+                teamAuthorIds={teamAuthorIds}
+                onMoveToTrash={onMoveToTrash}
+                onViewPreview={onViewPreview}
+              />
             </div>
           </div>
         ))}
@@ -221,3 +220,4 @@ export default function PostsTable({ posts, isContributor = false, showAssignedR
     </div>
   )
 }
+

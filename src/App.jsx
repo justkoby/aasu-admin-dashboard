@@ -15,6 +15,7 @@ import CategoriesPage from './pages/CategoriesPage'
 import MediaLibraryPage from './pages/MediaLibraryPage'
 import ActivityLogPage from './pages/ActivityLogPage'
 import ProfilePage from './pages/ProfilePage'
+import TrashPostsPage from './pages/TrashPostsPage'
 
 export default function App() {
   return (
@@ -41,6 +42,7 @@ export default function App() {
 
             {/* Content-Management Module routes (all authenticated users) */}
             <Route path="posts" element={<PostsPage />} />
+            <Route path="posts/trash" element={<TrashPostsPage />} />
             <Route path="posts/new" element={<PostEditorPage />} />
             <Route path="posts/:id/edit" element={<PostEditorPage />} />
 

@@ -62,10 +62,11 @@ export default function ReviewQueuePage() {
     setIsLoading(true)
     setError(null)
     try {
-      // 1. Total awaiting review (scoped for supervisor)
+      // 1. Total awaiting review (scoped for supervisor, excluding trashed)
       let countQ = supabase.from('posts')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'in_review')
+        .is('deleted_at', null)
       if (isSupervisor && profile?.id) {
         countQ = countQ.eq('assigned_reviewer_id', profile.id)
       }
@@ -75,7 +76,7 @@ export default function ReviewQueuePage() {
 
       // 2. Build filtered query helpers
       const applyFilters = (query) => {
-        let q = query.eq('status', 'in_review')
+        let q = query.eq('status', 'in_review').is('deleted_at', null)
         if (isSupervisor && profile?.id) {
           q = q.eq('assigned_reviewer_id', profile.id)
         }
@@ -133,6 +134,7 @@ export default function ReviewQueuePage() {
         .from('posts')
         .select('*, review_notes!inner(id, note, note_type, created_at, author:profiles!review_notes_author_id_fkey(full_name, email))')
         .eq('author_id', user.id)
+        .is('deleted_at', null)
         .order('updated_at', { ascending: false })
 
       // Fallback: two-step query if the embed filter is unavailable
@@ -142,6 +144,7 @@ export default function ReviewQueuePage() {
           .from('posts')
           .select('*')
           .eq('author_id', user.id)
+          .is('deleted_at', null)
           .order('updated_at', { ascending: false })
         if (postsErr) throw postsErr
 

@@ -57,10 +57,11 @@ export default function SupervisorDashboardPage() {
         setStats(s => ({ ...s, contributors: contributorIds.length }))
       }
 
-      // 2. Team posts stats
+      // 2. Team posts stats (excluding trashed posts)
       const { data: allTeamPosts, error: postsErr } = await supabase
         .from('posts')
         .select('id, status')
+        .is('deleted_at', null)
         .in('author_id', authorIds)
 
       if (postsErr) throw postsErr
@@ -75,12 +76,13 @@ export default function SupervisorDashboardPage() {
         }))
       }
 
-      // 3. Recent team posts (with author join)
+      // 3. Recent team posts (excluding trashed posts)
       let recentData = []
       try {
         const { data, error: recentErr } = await supabase
           .from('posts')
           .select('id, title, status, type, updated_at, created_at, author:profiles!posts_author_id_fkey(full_name, email)')
+          .is('deleted_at', null)
           .in('author_id', authorIds)
           .order('updated_at', { ascending: false })
           .limit(8)
@@ -90,6 +92,7 @@ export default function SupervisorDashboardPage() {
         const { data } = await supabase
           .from('posts')
           .select('id, title, status, type, updated_at, created_at')
+          .is('deleted_at', null)
           .in('author_id', authorIds)
           .order('updated_at', { ascending: false })
           .limit(8)

@@ -4,6 +4,7 @@ import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import PostFilters from '../components/posts/PostFilters'
 import PostsTable from '../components/posts/PostsTable'
+import TrashConfirmModal from '../components/posts/TrashConfirmModal'
 import { Plus, RefreshCw, FileText, ChevronLeft, ChevronRight, AlertTriangle, CheckCircle2 } from 'lucide-react'
 import '../styles/posts.css'
 
@@ -105,8 +106,11 @@ export default function PostsPage() {
         }
       }
 
-      // 2. Build Count Query
-      let countQuery = supabase.from('posts').select('*', { count: 'exact', head: true })
+      // 2. Build Count Query (excluding trashed posts)
+      let countQuery = supabase
+        .from('posts')
+        .select('*', { count: 'exact', head: true })
+        .is('deleted_at', null)
 
       // Apply Role filters
       if (profile?.role === 'contributor') {
@@ -137,15 +141,11 @@ export default function PostsPage() {
       }
 
       // 3. Build Data Fetching Query (with robust profile join fallbacks)
-      let dataQuery = null
-      let useFallback = false
-
       const runQuery = async (queryWithJoin = true) => {
         let q = supabase.from('posts')
 
         if (queryWithJoin) {
-          // Use the explicit FK alias so Supabase resolves the correct relation
-          // even when multiple FK paths exist between posts and profiles.
+          // Use explicit FK alias so Supabase resolves the correct relation
           q = q.select(
             '*, author:profiles!posts_author_id_fkey(full_name, email), assigned_reviewer:profiles!posts_assigned_reviewer_id_fkey(full_name, email)'
           )
@@ -153,6 +153,9 @@ export default function PostsPage() {
           // Fallback: no join — author column will show 'Unknown author'
           q = q.select('*')
         }
+
+        // Exclude trashed posts
+        q = q.is('deleted_at', null)
 
         // Apply filters
         if (profile?.role === 'contributor') {
@@ -192,7 +195,6 @@ export default function PostsPage() {
       let result = await runQuery(true)
       if (result.error) {
         console.warn('Posts with profiles query failed, falling back to select(*):', result.error)
-        useFallback = true
         result = await runQuery(false)
       }
 
@@ -210,6 +212,63 @@ export default function PostsPage() {
       if (isMounted) {
         setIsLoading(false)
       }
+    }
+  }
+
+  // Trash handling state
+  const [postToTrash, setPostToTrash] = useState(null)
+  const [isTrashing, setIsTrashing] = useState(false)
+  const [trashError, setTrashError] = useState(null)
+
+  const handleConfirmTrash = async (post) => {
+    setIsTrashing(true)
+    setTrashError(null)
+
+    try {
+      let trashedRow = null
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('trash_post', {
+        p_post_id: post.id
+      })
+
+      if (rpcErr) {
+        console.warn('trash_post RPC failed, executing direct update fallback:', rpcErr)
+        const { data: updateData, error: updateErr } = await supabase
+          .from('posts')
+          .update({
+            status_before_delete: post.status,
+            status: 'archived',
+            deleted_at: new Date().toISOString(),
+            deleted_by: user.id,
+            hero_position: 'none',
+            featured_until: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', post.id)
+          .select('id, title')
+          .single()
+
+        if (updateErr) throw updateErr
+        trashedRow = updateData
+      } else {
+        trashedRow = rpcData
+      }
+
+      if (!trashedRow) {
+        throw new Error('No post row was updated during soft delete.')
+      }
+
+      setPostToTrash(null)
+      setFlash({
+        type: 'success',
+        message: `Moved ‘${post.title || 'Untitled'}’ to Trash successfully.`
+      })
+
+      await loadPosts(true)
+    } catch (err) {
+      console.error('Error moving post to trash:', err)
+      setTrashError(err)
+    } finally {
+      setIsTrashing(false)
     }
   }
 
@@ -336,7 +395,14 @@ export default function PostsPage() {
       ) : (
         // Table list
         <>
-          <PostsTable posts={posts} isContributor={profile?.role === 'contributor'} showAssignedReviewer={profile?.role !== 'contributor'} />
+          <PostsTable
+            posts={posts}
+            userRole={profile?.role}
+            userId={user?.id}
+            isContributor={profile?.role === 'contributor'}
+            showAssignedReviewer={profile?.role !== 'contributor'}
+            onMoveToTrash={(post) => setPostToTrash(post)}
+          />
 
           {/* Pagination bar */}
           {totalPages > 1 && (
@@ -368,6 +434,21 @@ export default function PostsPage() {
           )}
         </>
       )}
+
+      {/* Trash Confirm Modal */}
+      {postToTrash && (
+        <TrashConfirmModal
+          post={postToTrash}
+          onConfirm={handleConfirmTrash}
+          onCancel={() => {
+            setPostToTrash(null)
+            setTrashError(null)
+          }}
+          isSubmitting={isTrashing}
+          error={trashError}
+        />
+      )}
     </div>
   )
 }
+

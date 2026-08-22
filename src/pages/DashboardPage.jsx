@@ -40,30 +40,32 @@ export default function DashboardPage() {
     setIsLoading(true)
     setError(null)
     try {
-      // 1. Fetch stats
+      // 1. Fetch stats (excluding trashed posts)
       const { data: allPosts, error: statsError } = await supabase
         .from('posts')
         .select('status')
+        .is('deleted_at', null)
       
       if (statsError) throw statsError
 
       if (isMounted) {
-        const total = allPosts.length
-        const published = allPosts.filter((p) => p.status === 'published').length
-        const drafts = allPosts.filter((p) => p.status === 'draft').length
-        const review = allPosts.filter(
+        const total = (allPosts || []).length
+        const published = (allPosts || []).filter((p) => p.status === 'published').length
+        const drafts = (allPosts || []).filter((p) => p.status === 'draft').length
+        const review = (allPosts || []).filter(
           (p) => p.status === 'in_review'
         ).length
 
         setStats({ total, published, drafts, review })
       }
 
-      // 2. Fetch recent posts
+      // 2. Fetch recent posts (excluding trashed posts)
       let postsData = []
       try {
         const { data, error: postsErr } = await supabase
           .from('posts')
           .select('*, author:profiles!posts_author_id_fkey(full_name, email)')
+          .is('deleted_at', null)
           .order('updated_at', { ascending: false })
           .limit(10)
         
@@ -74,6 +76,7 @@ export default function DashboardPage() {
         const { data, error: fallbackErr } = await supabase
           .from('posts')
           .select('*')
+          .is('deleted_at', null)
           .order('updated_at', { ascending: false })
           .limit(10)
         
@@ -114,7 +117,7 @@ export default function DashboardPage() {
         }
       }
 
-      // 4. Fetch drafts with requested changes (Contributor only)
+      // 4. Fetch drafts with requested changes (Contributor only, excluding trashed)
       if (profile?.role === 'contributor' && profile?.id) {
         let requestedData = []
         try {
@@ -123,6 +126,7 @@ export default function DashboardPage() {
             .select('id, title, updated_at, review_notes!inner(id, note, note_type, created_at, author:profiles!review_notes_author_id_fkey(full_name, email))')
             .eq('author_id', profile.id)
             .eq('status', 'draft')
+            .is('deleted_at', null)
             .order('updated_at', { ascending: false })
             .limit(5)
 
@@ -136,6 +140,7 @@ export default function DashboardPage() {
               .select('id, title, updated_at, review_notes!inner(id, note, note_type, created_at)')
               .eq('author_id', profile.id)
               .eq('status', 'draft')
+              .is('deleted_at', null)
               .order('updated_at', { ascending: false })
               .limit(5)
 
