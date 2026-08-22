@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useMemo } from 'react'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import { formatRole } from '../utils/formatRole'
@@ -19,15 +19,28 @@ import '../styles/users.css'
 
 // ─── Helpers ────────────────────────────────────────────────────────────────
 
+const logSupabaseError = (operation, error) => {
+  if (!error) return
+  console.error(`[AASU User Management] Supabase Error during ${operation}:`, {
+    operation,
+    code: error.code ?? null,
+    message: error.message ?? null,
+    details: error.details ?? null,
+    hint: error.hint ?? null,
+    errorObj: error
+  })
+}
+
 const getInitials = (name, email) => {
-  if (name) return name.charAt(0).toUpperCase()
-  if (email) return email.charAt(0).toUpperCase()
+  if (name && name.trim()) return name.trim().charAt(0).toUpperCase()
+  if (email && email.trim()) return email.trim().charAt(0).toUpperCase()
   return '?'
 }
 
 const resolveDisplayName = (p) => {
-  if (p?.full_name) return p.full_name
-  if (p?.email) return p.email
+  if (!p) return 'Unknown user'
+  if (p.full_name && p.full_name.trim()) return p.full_name.trim()
+  if (p.email && p.email.trim()) return p.email.trim()
   return 'Unknown user'
 }
 
@@ -46,6 +59,7 @@ const ROLE_OPTIONS = [
   { value: 'contributor', label: 'Contributor' },
   { value: 'supervisor', label: 'Supervisor' },
   { value: 'communications_admin', label: 'Communications Admin' },
+  { value: 'super_admin', label: 'Super Admin' },
 ]
 
 // ─── Role Badge ──────────────────────────────────────────────────────────────
@@ -83,10 +97,10 @@ export default function UsersPage() {
 
   // ── Data ──
   const [users, setUsers] = useState([])
-  const [supervisors, setSupervisors] = useState([]) // profiles with role=supervisor
-  const [assignments, setAssignments] = useState([]) // all active supervisor_assignments
+  const [assignments, setAssignments] = useState([])
   const [isLoading, setIsLoading] = useState(true)
   const [error, setError] = useState(null)
+  const [assignmentWarning, setAssignmentWarning] = useState(null)
 
   // ── Filters ──
   const [searchTerm, setSearchTerm] = useState('')
@@ -94,85 +108,160 @@ export default function UsersPage() {
   const [statusFilter, setStatusFilter] = useState('')
 
   // ── Modal ──
-  const [managingUser, setManagingUser] = useState(null) // profile being managed
+  const [managingUser, setManagingUser] = useState(null)
   const [modalRole, setModalRole] = useState('')
   const [isSaving, setIsSaving] = useState(false)
-  const [notification, setNotification] = useState(null) // { type, message }
+  const [notification, setNotification] = useState(null)
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Load users, supervisors, and assignments
+  // Load users and assignments separately
   // ─────────────────────────────────────────────────────────────────────────
 
   const loadData = useCallback(async () => {
     setIsLoading(true)
     setError(null)
+    setAssignmentWarning(null)
+
+    let profilesData = []
+    let profilesError = null
+
+    // Query 1: Fetch profiles
     try {
-      const [profilesRes, assignmentsRes] = await Promise.all([
-        supabase
+      let res = await supabase
+        .from('profiles')
+        .select('id, full_name, email, role, is_active, avatar_url, created_at, updated_at')
+        .order('created_at', { ascending: false })
+
+      if (res.error) {
+        logSupabaseError('profiles.select (full columns)', res.error)
+        // Fallback to essential columns in case schema differs
+        res = await supabase
           .from('profiles')
           .select('id, full_name, email, role, is_active, created_at')
-          .order('created_at', { ascending: false }),
-        supabase
+          .order('created_at', { ascending: false })
+      }
+
+      if (res.error) {
+        logSupabaseError('profiles.select (fallback)', res.error)
+        profilesError = res.error
+      } else {
+        profilesData = res.data || []
+      }
+    } catch (err) {
+      logSupabaseError('profiles.select (exception)', err)
+      profilesError = err
+    }
+
+    // Critical failure: if profiles query fails completely, show error state
+    if (profilesError) {
+      setError(profilesError)
+      setIsLoading(false)
+      return
+    }
+
+    // Query 2: Fetch supervisor_assignments
+    let assignmentsData = []
+    try {
+      let res = await supabase
+        .from('supervisor_assignments')
+        .select('id, supervisor_id, contributor_id, assigned_by, is_active, assigned_at, updated_at')
+
+      if (res.error) {
+        logSupabaseError('supervisor_assignments.select (full columns)', res.error)
+        // Fallback query with essential columns
+        res = await supabase
           .from('supervisor_assignments')
           .select('id, supervisor_id, contributor_id, is_active, created_at')
           .eq('is_active', true)
-      ])
+      }
 
-      if (profilesRes.error) throw profilesRes.error
-      if (assignmentsRes.error) throw assignmentsRes.error
-
-      const allProfiles = profilesRes.data || []
-      setUsers(allProfiles)
-      setSupervisors(allProfiles.filter(p => p.role === 'supervisor'))
-      setAssignments(assignmentsRes.data || [])
+      if (res.error) {
+        logSupabaseError('supervisor_assignments.select (fallback)', res.error)
+        setAssignmentWarning('Supervisor assignments could not be loaded. Displaying user profiles.')
+      } else {
+        assignmentsData = res.data || []
+      }
     } catch (err) {
-      console.error('Error loading users:', err)
-      setError(err)
-    } finally {
-      setIsLoading(false)
+      logSupabaseError('supervisor_assignments.select (exception)', err)
+      setAssignmentWarning('Supervisor assignments could not be loaded. Displaying user profiles.')
     }
+
+    setUsers(profilesData)
+    setAssignments(assignmentsData.filter(a => a.is_active !== false))
+    setIsLoading(false)
   }, [])
 
-  useEffect(() => { loadData() }, [loadData])
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  // ─────────────────────────────────────────────────────────────────────────
+  // JavaScript Map Indexing
+  // ─────────────────────────────────────────────────────────────────────────
+
+  const userMap = useMemo(() => {
+    const map = new Map()
+    users.forEach(u => map.set(u.id, u))
+    return map
+  }, [users])
+
+  const supervisors = useMemo(() => {
+    return users.filter(u => u.role === 'supervisor')
+  }, [users])
+
+  const supervisorToContributorsMap = useMemo(() => {
+    const map = new Map()
+    assignments.forEach(a => {
+      if (a.is_active === false) return
+      const supId = a.supervisor_id
+      const contrib = userMap.get(a.contributor_id)
+      if (supId && contrib) {
+        if (!map.has(supId)) map.set(supId, [])
+        map.get(supId).push(contrib)
+      }
+    })
+    return map
+  }, [assignments, userMap])
+
+  const contributorToSupervisorMap = useMemo(() => {
+    const map = new Map()
+    assignments.forEach(a => {
+      if (a.is_active === false) return
+      const contribId = a.contributor_id
+      const supervisor = userMap.get(a.supervisor_id)
+      if (contribId && supervisor) {
+        map.set(contribId, supervisor)
+      }
+    })
+    return map
+  }, [assignments, userMap])
 
   // ─────────────────────────────────────────────────────────────────────────
   // Filtered display list
   // ─────────────────────────────────────────────────────────────────────────
 
-  const filteredUsers = users.filter(u => {
-    const term = searchTerm.trim().toLowerCase()
-    if (term) {
-      const matchName = (u.full_name || '').toLowerCase().includes(term)
-      const matchEmail = (u.email || '').toLowerCase().includes(term)
-      if (!matchName && !matchEmail) return false
-    }
-    if (roleFilter && u.role !== roleFilter) return false
-    if (statusFilter === 'active' && !u.is_active) return false
-    if (statusFilter === 'inactive' && u.is_active) return false
-    return true
-  })
+  const filteredUsers = useMemo(() => {
+    return users.filter(u => {
+      const term = searchTerm.trim().toLowerCase()
+      if (term) {
+        const matchName = (u.full_name || '').toLowerCase().includes(term)
+        const matchEmail = (u.email || '').toLowerCase().includes(term)
+        if (!matchName && !matchEmail) return false
+      }
+      if (roleFilter && u.role !== roleFilter) return false
+      if (statusFilter === 'active' && !u.is_active) return false
+      if (statusFilter === 'inactive' && u.is_active) return false
+      return true
+    })
+  }, [users, searchTerm, roleFilter, statusFilter])
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Assignment helpers
+  // Table Cell Rendering
   // ─────────────────────────────────────────────────────────────────────────
-
-  const getSupervisorForContributor = (contributorId) => {
-    const a = assignments.find(a => a.contributor_id === contributorId)
-    if (!a) return null
-    return users.find(u => u.id === a.supervisor_id) || null
-  }
-
-  const getContributorsForSupervisor = (supervisorId) => {
-    const assigned = assignments
-      .filter(a => a.supervisor_id === supervisorId)
-      .map(a => users.find(u => u.id === a.contributor_id))
-      .filter(Boolean)
-    return assigned
-  }
 
   const getAssignmentRow = (user) => {
     if (user.role === 'contributor') {
-      const sup = getSupervisorForContributor(user.id)
+      const sup = contributorToSupervisorMap.get(user.id)
       return (
         <div className="assignment-info">
           <span className="assignment-label">Supervisor</span>
@@ -183,7 +272,7 @@ export default function UsersPage() {
       )
     }
     if (user.role === 'supervisor') {
-      const interns = getContributorsForSupervisor(user.id)
+      const interns = supervisorToContributorsMap.get(user.id) || []
       return (
         <div className="assignment-info">
           <span className="assignment-label">Interns</span>
@@ -197,7 +286,7 @@ export default function UsersPage() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Open manage modal
+  // Modal handlers & Actions
   // ─────────────────────────────────────────────────────────────────────────
 
   const openManage = (user) => {
@@ -213,10 +302,9 @@ export default function UsersPage() {
 
   const isOwnAccount = managingUser?.id === authProfile?.id
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Save: role change
-  // ─────────────────────────────────────────────────────────────────────────
-
+  /**
+   * Save role change directly to Supabase and update local state upon DB confirmation.
+   */
   const handleSaveRole = async () => {
     if (!managingUser || isOwnAccount) return
     if (modalRole === managingUser.role) return
@@ -227,48 +315,102 @@ export default function UsersPage() {
     if (!confirmed) return
 
     setIsSaving(true)
-    try {
-      const { error } = await supabase
-        .from('profiles')
-        .update({ role: modalRole })
-        .eq('id', managingUser.id)
-      if (error) throw error
+    setNotification(null)
 
-      // If a supervisor is demoted, deactivate their assignments
-      if (managingUser.role === 'supervisor' && modalRole !== 'supervisor') {
-        await supabase
+    try {
+      // 1. Execute Supabase update as specified
+      const { data, error } = await supabase
+        .from('profiles')
+        .update({
+          role: modalRole,
+          updated_at: new Date().toISOString()
+        })
+        .eq('id', managingUser.id)
+        .select('id, full_name, email, role, is_active, created_at, updated_at')
+        .single()
+
+      if (error) {
+        console.error('[User Management Error] Failed to update user role in Supabase:', {
+          code: error.code ?? null,
+          message: error.message ?? null,
+          details: error.details ?? null,
+          hint: error.hint ?? null,
+          managedUserId: managingUser.id,
+          selectedRole: modalRole
+        })
+        setNotification({
+          type: 'error',
+          message: `Failed to persist role change to Supabase: ${error.message || 'Database update error.'}`
+        })
+        setIsSaving(false)
+        return
+      }
+
+      if (!data) {
+        console.error('[User Management Error] No database row returned after role update:', {
+          managedUserId: managingUser.id,
+          selectedRole: modalRole
+        })
+        setNotification({
+          type: 'error',
+          message: 'Failed to update role. No data returned from Supabase.'
+        })
+        setIsSaving(false)
+        return
+      }
+
+      // 2. Handle side-effects (assignment deactivation) if supervisor/contributor roles changed
+      if (managingUser.role === 'supervisor' && data.role !== 'supervisor') {
+        const { error: deactErr } = await supabase
           .from('supervisor_assignments')
           .update({ is_active: false })
           .eq('supervisor_id', managingUser.id)
+        if (deactErr) {
+          logSupabaseError('supervisor_assignments.update (supervisor demotion)', deactErr)
+        }
       }
-      // If a contributor's role changes, deactivate any supervisor assignment
-      if (managingUser.role === 'contributor' && modalRole !== 'contributor') {
-        await supabase
+      if (managingUser.role === 'contributor' && data.role !== 'contributor') {
+        const { error: deactErr } = await supabase
           .from('supervisor_assignments')
           .update({ is_active: false })
           .eq('contributor_id', managingUser.id)
+        if (deactErr) {
+          logSupabaseError('supervisor_assignments.update (contributor role change)', deactErr)
+        }
       }
 
-      setNotification({ type: 'success', message: `Role updated to ${formatRole(modalRole)}.` })
+      // 3. Update local state with confirmed database row
+      setUsers(prevUsers =>
+        prevUsers.map(u => (u.id === data.id ? { ...u, ...data } : u))
+      )
+      setManagingUser(data)
+      setModalRole(data.role)
+
+      setNotification({
+        type: 'success',
+        message: `Role successfully updated to ${formatRole(data.role)} in Supabase.`
+      })
+
+      // 4. Refetch full profiles list from database
       await loadData()
-      // Refresh managingUser from fresh data
-      const { data: fresh } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, role, is_active, created_at')
-        .eq('id', managingUser.id)
-        .single()
-      if (fresh) setManagingUser(fresh)
     } catch (err) {
-      console.error('Role update failed:', err)
-      setNotification({ type: 'error', message: 'Failed to update role. Please try again.' })
+      console.error('[User Management Error] Exception during handleSaveRole:', {
+        code: err?.code ?? null,
+        message: err?.message ?? null,
+        details: err?.details ?? null,
+        hint: err?.hint ?? null,
+        managedUserId: managingUser?.id ?? null,
+        selectedRole: modalRole,
+        exception: err
+      })
+      setNotification({
+        type: 'error',
+        message: `An unexpected error occurred: ${err.message || 'Save failed'}`
+      })
     } finally {
       setIsSaving(false)
     }
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Save: activate / deactivate
-  // ─────────────────────────────────────────────────────────────────────────
 
   const handleToggleActive = async () => {
     if (!managingUser || isOwnAccount) return
@@ -282,40 +424,58 @@ export default function UsersPage() {
     if (!confirmed) return
 
     setIsSaving(true)
+    setNotification(null)
+
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('profiles')
-        .update({ is_active: !managingUser.is_active })
+        .update({
+          is_active: !managingUser.is_active,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', managingUser.id)
-      if (error) throw error
+        .select('id, full_name, email, role, is_active, created_at, updated_at')
+        .single()
+
+      if (error) {
+        console.error('[User Management Error] Failed to update user active status in Supabase:', {
+          code: error.code ?? null,
+          message: error.message ?? null,
+          details: error.details ?? null,
+          hint: error.hint ?? null,
+          managedUserId: managingUser.id,
+          targetIsActive: !managingUser.is_active
+        })
+        setNotification({
+          type: 'error',
+          message: `Failed to update status in Supabase: ${error.message || 'Database update error.'}`
+        })
+        setIsSaving(false)
+        return
+      }
+
+      if (data) {
+        setUsers(prev => prev.map(u => (u.id === data.id ? { ...u, ...data } : u)))
+        setManagingUser(data)
+      }
 
       setNotification({
         type: 'success',
         message: willDeactivate ? 'Account deactivated.' : 'Account reactivated.'
       })
       await loadData()
-      const { data: fresh } = await supabase
-        .from('profiles')
-        .select('id, full_name, email, role, is_active, created_at')
-        .eq('id', managingUser.id)
-        .single()
-      if (fresh) setManagingUser(fresh)
     } catch (err) {
-      console.error('Active toggle failed:', err)
+      console.error('[User Management Error] Exception during handleToggleActive:', err)
       setNotification({ type: 'error', message: 'Failed to update account status.' })
     } finally {
       setIsSaving(false)
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Assign supervisor to contributor
-  // ─────────────────────────────────────────────────────────────────────────
-
   const handleAssignSupervisor = async (supervisorId) => {
     if (!managingUser || managingUser.role !== 'contributor' || !supervisorId) return
 
-    const sup = users.find(u => u.id === supervisorId)
+    const sup = userMap.get(supervisorId)
     const confirmed = window.confirm(
       `Assign ${resolveDisplayName(managingUser)} to supervisor ${resolveDisplayName(sup)}?`
     )
@@ -323,39 +483,42 @@ export default function UsersPage() {
 
     setIsSaving(true)
     try {
-      // Deactivate any existing active assignment for this contributor
-      await supabase
+      // Deactivate existing active assignments for this contributor
+      const { error: deactErr } = await supabase
         .from('supervisor_assignments')
         .update({ is_active: false })
         .eq('contributor_id', managingUser.id)
         .eq('is_active', true)
 
+      if (deactErr) logSupabaseError('supervisor_assignments.update (deactivate old)', deactErr)
+
       // Insert new assignment
-      const { error } = await supabase
+      const { error: insErr } = await supabase
         .from('supervisor_assignments')
         .insert({
           supervisor_id: supervisorId,
           contributor_id: managingUser.id,
           is_active: true
         })
-      if (error) throw error
+
+      if (insErr) {
+        logSupabaseError('supervisor_assignments.insert', insErr)
+        throw insErr
+      }
 
       setNotification({ type: 'success', message: `Assigned to ${resolveDisplayName(sup)}.` })
       await loadData()
     } catch (err) {
-      console.error('Assignment failed:', err)
+      logSupabaseError('handleAssignSupervisor exception', err)
       setNotification({ type: 'error', message: 'Failed to create assignment. Please try again.' })
     } finally {
       setIsSaving(false)
     }
   }
 
-  // ─────────────────────────────────────────────────────────────────────────
-  // Remove assignment
-  // ─────────────────────────────────────────────────────────────────────────
-
-  const handleRemoveAssignment = async (contributorId) => {
-    const contributor = users.find(u => u.id === contributorId)
+  const handleRemoveAssignment = async (contributorId, supervisorId) => {
+    const targetSupId = supervisorId || managingUser?.id
+    const contributor = userMap.get(contributorId)
     const confirmed = window.confirm(
       `Remove ${resolveDisplayName(contributor)} from this supervisor? The assignment history will be preserved.`
     )
@@ -366,15 +529,19 @@ export default function UsersPage() {
       const { error } = await supabase
         .from('supervisor_assignments')
         .update({ is_active: false })
-        .eq('supervisor_id', managingUser.id)
+        .eq('supervisor_id', targetSupId)
         .eq('contributor_id', contributorId)
         .eq('is_active', true)
-      if (error) throw error
+
+      if (error) {
+        logSupabaseError('supervisor_assignments.update (remove)', error)
+        throw error
+      }
 
       setNotification({ type: 'success', message: 'Assignment removed.' })
       await loadData()
     } catch (err) {
-      console.error('Remove assignment failed:', err)
+      logSupabaseError('handleRemoveAssignment exception', err)
       setNotification({ type: 'error', message: 'Failed to remove assignment.' })
     } finally {
       setIsSaving(false)
@@ -409,7 +576,15 @@ export default function UsersPage() {
         </div>
       </div>
 
-      {/* Top-level notification */}
+      {/* Non-blocking Assignment Warning Banner */}
+      {assignmentWarning && (
+        <div className="users-notification error" style={{ marginBottom: '16px' }}>
+          <AlertTriangle size={16} />
+          <span>{assignmentWarning}</span>
+        </div>
+      )}
+
+      {/* Top-level Notification */}
       {notification && !managingUser && (
         <div className={`users-notification ${notification.type}`}>
           {notification.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
@@ -515,7 +690,7 @@ export default function UsersPage() {
                         {getInitials(u.full_name, u.email)}
                       </div>
                       <div className="user-name-text">
-                        <span className="user-full-name">{u.full_name || '—'}</span>
+                        <span className="user-full-name">{u.full_name || u.email || 'Unknown user'}</span>
                         <span className="user-email">{u.email || '—'}</span>
                       </div>
                     </div>
@@ -550,7 +725,7 @@ export default function UsersPage() {
                       {getInitials(u.full_name, u.email)}
                     </div>
                     <div className="user-name-text">
-                      <span className="user-full-name">{u.full_name || u.email || '—'}</span>
+                      <span className="user-full-name">{u.full_name || u.email || 'Unknown user'}</span>
                       <span className="user-email">{u.email}</span>
                     </div>
                   </div>
@@ -585,9 +760,8 @@ export default function UsersPage() {
       {managingUser && (
         <ManageUserModal
           user={managingUser}
-          allSupervisors={supervisors}
-          assignments={assignments}
-          allUsers={users}
+          supervisors={supervisors}
+          userMap={userMap}
           modalRole={modalRole}
           setModalRole={setModalRole}
           isOwnAccount={isOwnAccount}
@@ -599,8 +773,8 @@ export default function UsersPage() {
           onAssignSupervisor={handleAssignSupervisor}
           onRemoveAssignment={handleRemoveAssignment}
           resolveDisplayName={resolveDisplayName}
-          getContributorsForSupervisor={getContributorsForSupervisor}
-          getSupervisorForContributor={getSupervisorForContributor}
+          supervisorToContributorsMap={supervisorToContributorsMap}
+          contributorToSupervisorMap={contributorToSupervisorMap}
         />
       )}
     </div>
@@ -611,9 +785,8 @@ export default function UsersPage() {
 
 function ManageUserModal({
   user,
-  allSupervisors,
-  assignments,
-  allUsers,
+  supervisors,
+  userMap,
   modalRole,
   setModalRole,
   isOwnAccount,
@@ -625,22 +798,18 @@ function ManageUserModal({
   onAssignSupervisor,
   onRemoveAssignment,
   resolveDisplayName,
-  getContributorsForSupervisor,
-  getSupervisorForContributor,
+  supervisorToContributorsMap,
+  contributorToSupervisorMap
 }) {
   const [selectedNewSupervisorId, setSelectedNewSupervisorId] = useState('')
 
-  const assignedSupervisor = user.role === 'contributor' ? getSupervisorForContributor(user.id) : null
-  const assignedContributors = user.role === 'supervisor' ? getContributorsForSupervisor(user.id) : []
+  const assignedSupervisor = user.role === 'contributor' ? contributorToSupervisorMap.get(user.id) : null
+  const assignedContributors = user.role === 'supervisor' ? (supervisorToContributorsMap.get(user.id) || []) : []
 
   // Supervisors available for assignment (not the current one already assigned)
-  const availableSupervisors = allSupervisors.filter(s => s.is_active && s.id !== assignedSupervisor?.id)
+  const availableSupervisors = supervisors.filter(s => s.is_active && s.id !== assignedSupervisor?.id)
 
-  const getInitials = (name, email) => {
-    if (name) return name.charAt(0).toUpperCase()
-    if (email) return email.charAt(0).toUpperCase()
-    return '?'
-  }
+  const isRoleChanged = modalRole !== user.role
 
   const handleAssign = () => {
     if (selectedNewSupervisorId) {
@@ -666,15 +835,15 @@ function ManageUserModal({
             {getInitials(user.full_name, user.email)}
           </div>
           <div>
-            <div className="modal-user-name">{user.full_name || user.email || 'Unknown user'}</div>
-            <div className="modal-user-email">{user.email}</div>
+            <div className="modal-user-name">{resolveDisplayName(user)}</div>
+            <div className="modal-user-email">{user.email || '—'}</div>
           </div>
         </div>
 
         {/* Body */}
         <div className="modal-body">
 
-          {/* Notification inside modal */}
+          {/* Visible notification / error inside modal */}
           {notification && (
             <div className={`users-notification ${notification.type}`} style={{ marginBottom: 0 }}>
               {notification.type === 'success'
@@ -742,17 +911,15 @@ function ManageUserModal({
                   <p className="modal-form-hint">
                     Changing the role updates their dashboard access immediately.
                   </p>
-                  {modalRole !== user.role && (
-                    <button
-                      className="modal-save-btn"
-                      style={{ alignSelf: 'flex-start', marginTop: '4px' }}
-                      onClick={onSaveRole}
-                      disabled={isSaving}
-                    >
-                      <CheckCircle2 size={14} />
-                      {isSaving ? 'Saving...' : 'Save Role Change'}
-                    </button>
-                  )}
+                  <button
+                    className="modal-save-btn"
+                    style={{ alignSelf: 'flex-start', marginTop: '4px' }}
+                    onClick={onSaveRole}
+                    disabled={isSaving || !isRoleChanged}
+                  >
+                    <CheckCircle2 size={14} />
+                    {isSaving ? 'Saving...' : 'Save Role Change'}
+                  </button>
                 </div>
               )}
             </div>
@@ -770,31 +937,12 @@ function ManageUserModal({
                       {resolveDisplayName(assignedSupervisor)}
                     </div>
                     <div className="modal-assignment-email">
-                      {assignedSupervisor.email}
+                      {assignedSupervisor.email || '—'}
                     </div>
                   </div>
                   <button
                     className="modal-assignment-remove-btn"
-                    onClick={() => {
-                      const confirmed = window.confirm(
-                        `Remove ${resolveDisplayName(user)} from supervisor ${resolveDisplayName(assignedSupervisor)}?`
-                      )
-                      if (!confirmed) return
-                      // Deactivate assignment from the contributor side
-                      supabase
-                        .from('supervisor_assignments')
-                        .update({ is_active: false })
-                        .eq('contributor_id', user.id)
-                        .eq('supervisor_id', assignedSupervisor.id)
-                        .eq('is_active', true)
-                        .then(({ error }) => {
-                          if (error) {
-                            console.error('Remove assignment failed:', error)
-                          }
-                          // Reload data via parent
-                          onRemoveAssignment && onRemoveAssignment(user.id)
-                        })
-                    }}
+                    onClick={() => onRemoveAssignment(user.id, assignedSupervisor.id)}
                     title="Remove assignment"
                     disabled={isSaving}
                   >
@@ -859,11 +1007,11 @@ function ManageUserModal({
                     <div className="modal-assignment-item" key={c.id}>
                       <div>
                         <div className="modal-assignment-name">{resolveDisplayName(c)}</div>
-                        <div className="modal-assignment-email">{c.email}</div>
+                        <div className="modal-assignment-email">{c.email || '—'}</div>
                       </div>
                       <button
                         className="modal-assignment-remove-btn"
-                        onClick={() => onRemoveAssignment(c.id)}
+                        onClick={() => onRemoveAssignment(c.id, user.id)}
                         title={`Remove ${resolveDisplayName(c)}`}
                         disabled={isSaving}
                       >
