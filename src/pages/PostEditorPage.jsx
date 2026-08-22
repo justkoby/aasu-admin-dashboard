@@ -24,7 +24,11 @@ import {
   ChevronDown,
   ChevronUp,
   Trash2,
-  RefreshCw
+  RefreshCw,
+  CalendarDays,
+  MapPin,
+  Link2,
+  TicketCheck
 } from 'lucide-react'
 import '../styles/posts.css'
 
@@ -115,7 +119,14 @@ export default function PostEditorPage() {
       seo_description: '',
       reference_number: '',
       external_url: '',
-      redirect_url: ''
+      redirect_url: '',
+      // Event-specific fields
+      event_start_at: '',
+      event_end_at: '',
+      event_location: '',
+      event_platform: '',
+      registration_url: '',
+      press_release_category: ''
     }
   })
 
@@ -229,6 +240,17 @@ export default function PostEditorPage() {
               ? postData.hero_position
               : 'none'
 
+            // Normalize event datetime columns from DB timestamptz → datetime-local string
+            const toDatetimeLocal = (val) => {
+              if (!val) return ''
+              try {
+                const d = new Date(val)
+                if (isNaN(d.getTime())) return ''
+                // Format: YYYY-MM-DDTHH:MM (datetime-local input format)
+                return d.toISOString().slice(0, 16)
+              } catch { return '' }
+            }
+
             reset({
               title: postData.title ?? '',
               slug: postData.slug ?? (postData.title ? createSlug(postData.title) : `event-${id}`),
@@ -245,7 +267,14 @@ export default function PostEditorPage() {
               seo_description: postData.seo_description ?? '',
               reference_number: postData.reference_number ?? '',
               external_url: postData.external_url ?? '',
-              redirect_url: postData.redirect_url ?? ''
+              redirect_url: postData.redirect_url ?? '',
+              // Event-specific fields — normalize from timestamptz or null
+              event_start_at: toDatetimeLocal(postData.event_start_at),
+              event_end_at: toDatetimeLocal(postData.event_end_at),
+              event_location: postData.event_location ?? '',
+              event_platform: postData.event_platform ?? '',
+              registration_url: postData.registration_url ?? '',
+              press_release_category: postData.press_release_category ?? ''
             })
 
             setPostLoaded(true)
@@ -380,6 +409,17 @@ export default function PostEditorPage() {
       }
 
       // 2. Build Database columns payload
+      const isEventType = (formValues.type || '').toLowerCase() === 'event'
+
+      // Helper: convert datetime-local string back to UTC ISO for DB storage
+      const toUtcIso = (val) => {
+        if (!val || !val.trim()) return null
+        try {
+          const d = new Date(val.trim())
+          return isNaN(d.getTime()) ? null : d.toISOString()
+        } catch { return null }
+      }
+
       const contentFields = {
         title: formValues.title ?? '',
         slug: currentSlug,
@@ -394,7 +434,14 @@ export default function PostEditorPage() {
         seo_description: formValues.seo_description || null,
         reference_number: formValues.reference_number || null,
         external_url: formValues.external_url || null,
-        redirect_url: formValues.redirect_url || null
+        redirect_url: formValues.redirect_url || null,
+        // Event-specific columns — always included in payload; null when not an event
+        event_start_at: isEventType ? toUtcIso(formValues.event_start_at) : null,
+        event_end_at: isEventType ? toUtcIso(formValues.event_end_at) : null,
+        event_location: isEventType ? (formValues.event_location || null) : null,
+        event_platform: isEventType ? (formValues.event_platform || null) : null,
+        registration_url: isEventType ? (formValues.registration_url || null) : null,
+        press_release_category: formValues.press_release_category || null
       }
 
       let payload
@@ -1063,6 +1110,113 @@ export default function PostEditorPage() {
               </div>
             </div>
           </div>
+
+          {/* Card: Event Details (conditionally rendered when type = event) */}
+          {(watch('type') || '').toLowerCase() === 'event' && (
+            <div className="editor-card event-details-card">
+              <div className="event-card-header">
+                <CalendarDays size={20} className="event-card-icon" />
+                <div>
+                  <h2 style={{ margin: 0 }}>Event Details</h2>
+                  <p className="uploader-hint" style={{ margin: '2px 0 0 0' }}>These fields are displayed on the public event listing and detail pages.</p>
+                </div>
+              </div>
+
+              <div className="event-fields-grid">
+                {/* Event Start */}
+                <div className="editor-form-group">
+                  <label htmlFor="event_start_at">
+                    <MapPin size={13} style={{ display: 'inline', marginRight: '4px', opacity: 0.6 }} />
+                    Event Start <span className="required-star">*</span>
+                  </label>
+                  <input
+                    id="event_start_at"
+                    type="datetime-local"
+                    {...register('event_start_at')}
+                    disabled={isSubmitting}
+                    className={errors.event_start_at ? 'has-error' : ''}
+                  />
+                  {errors.event_start_at && (
+                    <span className="validation-error-text">{errors.event_start_at.message}</span>
+                  )}
+                </div>
+
+                {/* Event End */}
+                <div className="editor-form-group">
+                  <label htmlFor="event_end_at">
+                    <MapPin size={13} style={{ display: 'inline', marginRight: '4px', opacity: 0.6 }} />
+                    Event End <span className="uploader-hint" style={{ fontWeight: 400 }}>(optional)</span>
+                  </label>
+                  <input
+                    id="event_end_at"
+                    type="datetime-local"
+                    {...register('event_end_at')}
+                    disabled={isSubmitting}
+                    className={errors.event_end_at ? 'has-error' : ''}
+                  />
+                  {errors.event_end_at && (
+                    <span className="validation-error-text">{errors.event_end_at.message}</span>
+                  )}
+                </div>
+              </div>
+
+              {/* Venue / Physical Location */}
+              <div className="editor-form-group">
+                <label htmlFor="event_location">
+                  <MapPin size={13} style={{ display: 'inline', marginRight: '4px', opacity: 0.6 }} />
+                  Venue / Location
+                </label>
+                <input
+                  id="event_location"
+                  type="text"
+                  {...register('event_location')}
+                  placeholder="e.g. Accra International Conference Centre, Ghana"
+                  disabled={isSubmitting}
+                />
+                <p className="uploader-hint" style={{ marginTop: '2px' }}>Physical address or venue name. Leave blank for online-only events.</p>
+              </div>
+
+              {/* Online Platform / Meeting Link */}
+              <div className="editor-form-group">
+                <label htmlFor="event_platform">
+                  <Link2 size={13} style={{ display: 'inline', marginRight: '4px', opacity: 0.6 }} />
+                  Online Platform / Meeting Link
+                </label>
+                <input
+                  id="event_platform"
+                  type="text"
+                  {...register('event_platform')}
+                  placeholder="e.g. Zoom, Google Meet, https://meet.example.com"
+                  disabled={isSubmitting}
+                  className={errors.event_platform ? 'has-error' : ''}
+                />
+                {errors.event_platform && (
+                  <span className="validation-error-text">{errors.event_platform.message}</span>
+                )}
+                <p className="uploader-hint" style={{ marginTop: '2px' }}>Platform name or full meeting URL for virtual/hybrid events.</p>
+              </div>
+
+              {/* Registration URL */}
+              <div className="editor-form-group">
+                <label htmlFor="registration_url">
+                  <TicketCheck size={13} style={{ display: 'inline', marginRight: '4px', opacity: 0.6 }} />
+                  Registration URL
+                </label>
+                <input
+                  id="registration_url"
+                  type="url"
+                  {...register('registration_url')}
+                  placeholder="https://..."
+                  disabled={isSubmitting}
+                  className={errors.registration_url ? 'has-error' : ''}
+                />
+                {errors.registration_url && (
+                  <span className="validation-error-text">{errors.registration_url.message}</span>
+                )}
+                <p className="uploader-hint" style={{ marginTop: '2px' }}>Direct link for attendee registration or ticket purchase.</p>
+              </div>
+            </div>
+          )}
 
           {/* ---------------- Right: Metadata & Settings Column ---------------- */}
           <div className="editor-settings-sidebar">

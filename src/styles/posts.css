@@ -944,3 +944,46 @@
   gap: 12px;
   margin-top: 20px;
 }
+
+/* ─────────────────────────────────────────────────────────────
+   EVENT DETAILS CARD — PostEditorPage
+───────────────────────────────────────────────────────────── */
+
+.event-details-card {
+  background: linear-gradient(135deg, #f0f7ff 0%, #ffffff 100%);
+  border: 1.5px solid #bfdbfe;
+  border-left: 4px solid var(--dash-gold, #d4a017);
+  grid-column: 1 / -1;
+}
+
+.event-card-header {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding-bottom: 16px;
+  border-bottom: 1px solid #dbeafe;
+}
+
+.event-card-icon {
+  color: var(--dash-gold, #d4a017);
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.event-fields-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px;
+}
+
+@media (max-width: 640px) {
+  .event-fields-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* datetime-local input styling */
+.editor-form-group input[type="datetime-local"] {
+  font-family: inherit;
+}
+
