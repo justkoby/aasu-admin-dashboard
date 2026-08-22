@@ -472,45 +472,165 @@ export default function UsersPage() {
     }
   }
 
+  /**
+   * Assign a supervisor to a contributor with mandatory logging and insert/update logic.
+   */
   const handleAssignSupervisor = async (supervisorId) => {
-    if (!managingUser || managingUser.role !== 'contributor' || !supervisorId) return
+    // 1. Requirement 4: MUST log on the very first line before any validation!
+    const authenticatedUserId = authProfile?.id
+    console.log('[AASU CMS] Assign Supervisor clicked', {
+      selectedSupervisorId: supervisorId,
+      contributorId: managingUser?.id,
+      authenticatedUserId: authenticatedUserId
+    })
 
-    const sup = userMap.get(supervisorId)
-    const confirmed = window.confirm(
-      `Assign ${resolveDisplayName(managingUser)} to supervisor ${resolveDisplayName(sup)}?`
-    )
-    if (!confirmed) return
+    // 2. Requirement 5: If empty, do not silently return — show message
+    if (!supervisorId) {
+      setNotification({ type: 'error', message: 'Please select a supervisor.' })
+      return false
+    }
+
+    if (!managingUser) {
+      setNotification({ type: 'error', message: 'No contributor selected.' })
+      return false
+    }
+
+    const targetContributor = managingUser
+
+    // 3. Validations
+    const selectedSupervisor = userMap.get(supervisorId)
+    if (!selectedSupervisor) {
+      console.error('[AASU CMS] Selected supervisor not found in userMap:', supervisorId)
+      setNotification({ type: 'error', message: 'Selected supervisor does not exist.' })
+      return false
+    }
+
+    if (selectedSupervisor.role !== 'supervisor') {
+      console.error('[AASU CMS] Selected user role is not supervisor:', selectedSupervisor)
+      setNotification({ type: 'error', message: 'Selected user is not a supervisor.' })
+      return false
+    }
+
+    if (targetContributor.role !== 'contributor') {
+      console.error('[AASU CMS] Target user role is not contributor:', targetContributor)
+      setNotification({ type: 'error', message: 'Only contributors can be assigned a supervisor.' })
+      return false
+    }
+
+    if (supervisorId === targetContributor.id) {
+      setNotification({ type: 'error', message: 'Supervisor ID cannot match contributor ID.' })
+      return false
+    }
 
     setIsSaving(true)
+    setNotification(null)
+
     try {
-      // Deactivate existing active assignments for this contributor
+      // Deactivate any existing active assignment for this contributor with a different supervisor
       const { error: deactErr } = await supabase
         .from('supervisor_assignments')
         .update({ is_active: false })
-        .eq('contributor_id', managingUser.id)
+        .eq('contributor_id', targetContributor.id)
+        .neq('supervisor_id', supervisorId)
         .eq('is_active', true)
 
-      if (deactErr) logSupabaseError('supervisor_assignments.update (deactivate old)', deactErr)
-
-      // Insert new assignment
-      const { error: insErr } = await supabase
-        .from('supervisor_assignments')
-        .insert({
-          supervisor_id: supervisorId,
-          contributor_id: managingUser.id,
-          is_active: true
-        })
-
-      if (insErr) {
-        logSupabaseError('supervisor_assignments.insert', insErr)
-        throw insErr
+      if (deactErr) {
+        logSupabaseError('supervisor_assignments.update (deactivate existing)', deactErr)
       }
 
-      setNotification({ type: 'success', message: `Assigned to ${resolveDisplayName(sup)}.` })
+      // Check for an existing relationship using supervisor_id + contributor_id
+      const { data: existingRow, error: checkErr } = await supabase
+        .from('supervisor_assignments')
+        .select('id, supervisor_id, contributor_id, is_active')
+        .eq('supervisor_id', supervisorId)
+        .eq('contributor_id', targetContributor.id)
+        .maybeSingle()
+
+      if (checkErr) {
+        console.error('[AASU CMS] Check existing relationship error:', checkErr)
+      }
+
+      let data = null
+      let error = null
+
+      if (existingRow) {
+        console.log('[AASU CMS] Updating existing supervisor assignment row:', existingRow.id)
+        const res = await supabase
+          .from('supervisor_assignments')
+          .update({
+            is_active: true,
+            assigned_by: authenticatedUserId
+          })
+          .eq('id', existingRow.id)
+          .select()
+          .single()
+
+        data = res.data
+        error = res.error
+      } else {
+        const assignmentPayload = {
+          supervisor_id: supervisorId,
+          contributor_id: targetContributor.id,
+          assigned_by: authenticatedUserId,
+          is_active: true
+        }
+
+        console.log('[AASU CMS] Creating supervisor assignment', assignmentPayload)
+
+        const res = await supabase
+          .from('supervisor_assignments')
+          .insert(assignmentPayload)
+          .select()
+          .single()
+
+        data = res.data
+        error = res.error
+      }
+
+      console.log('[AASU CMS] Assignment response', { data, error })
+
+      if (error || !data) {
+        console.error('[AASU CMS] Supervisor assignment failed:', {
+          code: error?.code ?? null,
+          message: error?.message ?? null,
+          details: error?.details ?? null,
+          hint: error?.hint ?? null,
+          supervisor_id: supervisorId,
+          contributor_id: targetContributor.id,
+          authenticatedUserId: authenticatedUserId
+        })
+
+        setNotification({
+          type: 'error',
+          message: `Failed to assign supervisor: ${error?.message || 'Database insert/update error.'}`
+        })
+        return false
+      }
+
+      // On success: refetch data and show success message
       await loadData()
+
+      setNotification({
+        type: 'success',
+        message: 'Supervisor assigned successfully'
+      })
+      return true
     } catch (err) {
-      logSupabaseError('handleAssignSupervisor exception', err)
-      setNotification({ type: 'error', message: 'Failed to create assignment. Please try again.' })
+      console.error('[AASU CMS] Exception during supervisor assignment:', {
+        code: err?.code ?? null,
+        message: err?.message ?? null,
+        details: err?.details ?? null,
+        hint: err?.hint ?? null,
+        supervisor_id: supervisorId,
+        contributor_id: targetContributor?.id,
+        authenticatedUserId: authenticatedUserId,
+        exception: err
+      })
+      setNotification({
+        type: 'error',
+        message: `Failed to assign supervisor: ${err.message || 'An unexpected error occurred.'}`
+      })
+      return false
     } finally {
       setIsSaving(false)
     }
@@ -525,23 +645,43 @@ export default function UsersPage() {
     if (!confirmed) return
 
     setIsSaving(true)
+    setNotification(null)
+
     try {
-      const { error } = await supabase
+      const { data, error } = await supabase
         .from('supervisor_assignments')
-        .update({ is_active: false })
+        .update({
+          is_active: false,
+          updated_at: new Date().toISOString()
+        })
         .eq('supervisor_id', targetSupId)
         .eq('contributor_id', contributorId)
         .eq('is_active', true)
+        .select('id, supervisor_id, contributor_id, is_active')
 
       if (error) {
         logSupabaseError('supervisor_assignments.update (remove)', error)
-        throw error
+        console.error('[Supervisor Assignment Remove Error]', {
+          operation: 'remove_assignment',
+          code: error.code ?? null,
+          message: error.message ?? null,
+          details: error.details ?? null,
+          hint: error.hint ?? null,
+          supervisor_id: targetSupId,
+          contributor_id: contributorId,
+          authenticated_user_id: authProfile?.id
+        })
+        setNotification({
+          type: 'error',
+          message: `Failed to remove assignment: ${error.message || 'Database update error.'}`
+        })
+        return
       }
 
-      setNotification({ type: 'success', message: 'Assignment removed.' })
+      setNotification({ type: 'success', message: 'Assignment removed successfully.' })
       await loadData()
     } catch (err) {
-      logSupabaseError('handleRemoveAssignment exception', err)
+      console.error('[Supervisor Assignment Remove Exception]', err)
       setNotification({ type: 'error', message: 'Failed to remove assignment.' })
     } finally {
       setIsSaving(false)
@@ -759,7 +899,7 @@ export default function UsersPage() {
       {/* ── Manage User Modal ── */}
       {managingUser && (
         <ManageUserModal
-          user={managingUser}
+          user={userMap.get(managingUser.id) || managingUser}
           supervisors={supervisors}
           userMap={userMap}
           modalRole={modalRole}
@@ -811,9 +951,14 @@ function ManageUserModal({
 
   const isRoleChanged = modalRole !== user.role
 
-  const handleAssign = () => {
-    if (selectedNewSupervisorId) {
-      onAssignSupervisor(selectedNewSupervisorId)
+  const handleAssign = async (e) => {
+    if (e) e.preventDefault()
+    if (!selectedNewSupervisorId) {
+      onAssignSupervisor('')
+      return
+    }
+    const success = await onAssignSupervisor(selectedNewSupervisorId)
+    if (success) {
       setSelectedNewSupervisorId('')
     }
   }
@@ -875,6 +1020,7 @@ function ManageUserModal({
                 </span>
               ) : (
                 <button
+                  type="button"
                   className={`modal-deactivate-btn ${user.is_active ? 'deactivate' : 'activate'}`}
                   onClick={onToggleActive}
                   disabled={isSaving}
@@ -912,6 +1058,7 @@ function ManageUserModal({
                     Changing the role updates their dashboard access immediately.
                   </p>
                   <button
+                    type="button"
                     className="modal-save-btn"
                     style={{ alignSelf: 'flex-start', marginTop: '4px' }}
                     onClick={onSaveRole}
@@ -941,6 +1088,7 @@ function ManageUserModal({
                     </div>
                   </div>
                   <button
+                    type="button"
                     className="modal-assignment-remove-btn"
                     onClick={() => onRemoveAssignment(user.id, assignedSupervisor.id)}
                     title="Remove assignment"
@@ -963,7 +1111,9 @@ function ManageUserModal({
                     <select
                       id="assign-supervisor-select"
                       value={selectedNewSupervisorId}
-                      onChange={e => setSelectedNewSupervisorId(e.target.value)}
+                      onChange={(event) => {
+                        setSelectedNewSupervisorId(event.target.value)
+                      }}
                       disabled={isSaving}
                       style={{ flex: 1 }}
                     >
@@ -975,9 +1125,10 @@ function ManageUserModal({
                       ))}
                     </select>
                     <button
+                      type="button"
                       className="modal-save-btn"
                       onClick={handleAssign}
-                      disabled={!selectedNewSupervisorId || isSaving}
+                      disabled={isSaving}
                       style={{ whiteSpace: 'nowrap' }}
                     >
                       {isSaving ? 'Saving...' : 'Assign'}
@@ -1010,6 +1161,7 @@ function ManageUserModal({
                         <div className="modal-assignment-email">{c.email || '—'}</div>
                       </div>
                       <button
+                        type="button"
                         className="modal-assignment-remove-btn"
                         onClick={() => onRemoveAssignment(c.id, user.id)}
                         title={`Remove ${resolveDisplayName(c)}`}
@@ -1027,7 +1179,7 @@ function ManageUserModal({
 
         {/* Footer */}
         <div className="modal-footer">
-          <button className="modal-cancel-btn" onClick={onClose} disabled={isSaving}>
+          <button type="button" className="modal-cancel-btn" onClick={onClose} disabled={isSaving}>
             Close
           </button>
         </div>
