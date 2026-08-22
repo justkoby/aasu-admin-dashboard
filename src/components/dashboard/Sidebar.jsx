@@ -171,13 +171,13 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         label: 'Categories',
         icon: <FolderKanban size={20} className="sidebar-icon" />,
         path: '/dashboard/categories',
-        comingNext: true
+        comingNext: false
       })
       contentItems.push({
         label: 'Media Library',
         icon: <Image size={20} className="sidebar-icon" />,
         path: '/dashboard/media',
-        comingNext: true
+        comingNext: false
       })
     } else if (isSupervisor) {
       contentItems.push({

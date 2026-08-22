@@ -11,6 +11,8 @@ import ReviewQueuePage from './pages/ReviewQueuePage'
 import ReviewPostPage from './pages/ReviewPostPage'
 import UsersPage from './pages/UsersPage'
 import TeamPostsPage from './pages/TeamPostsPage'
+import CategoriesPage from './pages/CategoriesPage'
+import MediaLibraryPage from './pages/MediaLibraryPage'
 
 export default function App() {
   return (
@@ -40,6 +42,9 @@ export default function App() {
             <Route path="posts/new" element={<PostEditorPage />} />
             <Route path="posts/:id/edit" element={<PostEditorPage />} />
 
+            {/* Media Library (all authenticated roles with role-scoped assets) */}
+            <Route path="media" element={<MediaLibraryPage />} />
+
             {/* Supervisor-scoped team posts view */}
             <Route
               path="team-posts"
@@ -53,6 +58,16 @@ export default function App() {
             {/* Editorial Review Workflow (admin + supervisor = canReview; contributor sees feedback) */}
             <Route path="review" element={<ReviewQueuePage />} />
             <Route path="review/:id" element={<ReviewPostPage />} />
+
+            {/* Super Admin & Communications Admin — Categories Management */}
+            <Route
+              path="categories"
+              element={
+                <RoleRoute allowedRoles={['super_admin', 'communications_admin']}>
+                  <CategoriesPage />
+                </RoleRoute>
+              }
+            />
 
             {/* Super Admin — User Management */}
             <Route

@@ -128,10 +128,19 @@ export default function PostEditorPage() {
 
       try {
         // 1. Fetch Categories
-        const { data: catData, error: catErr } = await supabase
+        let { data: catData, error: catErr } = await supabase
           .from('categories')
-          .select('id, name')
+          .select('id, name, is_active')
           .order('name', { ascending: true })
+
+        if (catErr && catErr.code === '42703') {
+          const fallbackRes = await supabase
+            .from('categories')
+            .select('id, name')
+            .order('name', { ascending: true })
+          catData = fallbackRes.data
+          catErr = fallbackRes.error
+        }
 
         if (catErr) {
           logSaveError('categories.select', catErr)
@@ -1052,20 +1061,22 @@ export default function PostEditorPage() {
             <div className="editor-card">
               <h2>Categories</h2>
               <div className="categories-checklist-container">
-                {categories.length === 0 ? (
-                  <span className="uploader-hint">No categories registered.</span>
+                {categories.filter(cat => cat.is_active !== false || selectedCategoryIds.includes(cat.id)).length === 0 ? (
+                  <span className="uploader-hint">No active categories available.</span>
                 ) : (
-                  categories.map((cat) => (
-                    <label key={cat.id} className="category-check-item">
-                      <input
-                        type="checkbox"
-                        checked={selectedCategoryIds.includes(cat.id)}
-                        onChange={() => handleCategoryToggle(cat.id)}
-                        disabled={isSubmitting}
-                      />
-                      <span>{cat.name}</span>
-                    </label>
-                  ))
+                  categories
+                    .filter(cat => cat.is_active !== false || selectedCategoryIds.includes(cat.id))
+                    .map((cat) => (
+                      <label key={cat.id} className="category-check-item">
+                        <input
+                          type="checkbox"
+                          checked={selectedCategoryIds.includes(cat.id)}
+                          onChange={() => handleCategoryToggle(cat.id)}
+                          disabled={isSubmitting}
+                        />
+                        <span>{cat.name}{cat.is_active === false ? ' (Inactive)' : ''}</span>
+                      </label>
+                    ))
                 )}
               </div>
             </div>

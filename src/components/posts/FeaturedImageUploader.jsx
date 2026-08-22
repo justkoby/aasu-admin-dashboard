@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react'
 import { supabase } from '../../lib/supabaseClient'
 import { compressImage } from '../../utils/imageCompression'
-import { Image as ImageIcon, Upload, X, AlertCircle } from 'lucide-react'
+import MediaPickerModal from '../media/MediaPickerModal'
+import { Image as ImageIcon, Upload, X, AlertCircle, FolderKanban } from 'lucide-react'
 
 export default function FeaturedImageUploader({
   url,
@@ -15,30 +16,35 @@ export default function FeaturedImageUploader({
   const [isUploading, setIsUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [localError, setLocalError] = useState(null)
+  const [isPickerOpen, setIsPickerOpen] = useState(false)
   const fileInputRef = useRef(null)
 
   const handleFileChange = async (e) => {
     const file = e.target.files?.[0]
     if (!file) return
 
-    // Clear previous errors
     setLocalError(null)
 
-    // 1. Validate file type
     if (!file.type.startsWith('image/')) {
       setLocalError('Please select a valid image file.')
       return
     }
 
+    if (file.size > 5 * 1024 * 1024) {
+      setLocalError('File size exceeds the 5MB limit.')
+      return
+    }
+
     setIsUploading(true)
-    setUploadProgress(10) // Start compression
+    setUploadProgress(10)
+
+    let filePath = null
 
     try {
-      // 2. Compress and convert to WebP client-side
-      const compressedBlob = await compressImage(file)
-      setUploadProgress(40) // Compression complete, starting upload
+      // Compress and resize
+      const { blob, width, height } = await compressImage(file)
+      setUploadProgress(40)
 
-      // 3. Upload to Supabase Storage bucket 'content-images'
       const uniqueId = Math.random().toString(36).substring(2, 9)
       const sanitizedName = file.name
         .toLowerCase()
@@ -47,33 +53,61 @@ export default function FeaturedImageUploader({
         .substring(0, 30)
       
       const fileName = `${Date.now()}-${sanitizedName || 'image'}-${uniqueId}.webp`
-      const filePath = `${userId}/${fileName}`
+      filePath = `${userId || 'anonymous'}/${fileName}`
 
       setUploadProgress(60)
 
-      const { data, error: uploadErr } = await supabase.storage
+      const { error: uploadErr } = await supabase.storage
         .from('content-images')
-        .upload(filePath, compressedBlob, {
+        .upload(filePath, blob, {
           contentType: 'image/webp',
-          cacheControl: '2592000', // 30 days
+          cacheControl: '2592000',
           upsert: false
         })
 
-      if (uploadErr) {
-        throw uploadErr
-      }
+      if (uploadErr) throw uploadErr
 
-      setUploadProgress(90)
+      setUploadProgress(85)
 
-      // 4. Get the public URL
       const { data: { publicUrl } } = supabase.storage
         .from('content-images')
         .getPublicUrl(filePath)
+
+      // Metadata insert
+      try {
+        const { error: metaErr } = await supabase
+          .from('media_assets')
+          .insert({
+            storage_path: filePath,
+            public_url: publicUrl,
+            original_filename: file.name,
+            file_type: 'image/webp',
+            mime_type: 'image/webp',
+            file_size: blob.size,
+            width,
+            height,
+            uploaded_by: userId || null
+          })
+
+        if (metaErr && metaErr.code !== '42P01') {
+          console.warn('[AASU CMS] Media metadata insert error:', metaErr)
+        }
+      } catch (mErr) {
+        console.warn('[AASU CMS] Media metadata insert exception:', mErr)
+      }
 
       setUploadProgress(100)
       onChangeUrl(publicUrl)
     } catch (err) {
       console.error('Upload failed:', err)
+      // Cleanup storage object if metadata insertion or upload step failed
+      if (filePath) {
+        try {
+          await supabase.storage.from('content-images').remove([filePath])
+        } catch (cleanErr) {
+          console.warn('Storage cleanup failed:', cleanErr)
+        }
+      }
       setLocalError(err.message || 'Image upload failed. Please try again.')
     } finally {
       setIsUploading(false)
@@ -107,6 +141,20 @@ export default function FeaturedImageUploader({
         disabled={isUploading}
       />
 
+      {/* Choose from Media Library Button */}
+      {!url && (
+        <button
+          type="button"
+          className="edit-action-btn"
+          style={{ width: '100%', justifyContent: 'center', marginBottom: '10px' }}
+          onClick={() => setIsPickerOpen(true)}
+          disabled={isUploading}
+        >
+          <FolderKanban size={14} />
+          <span>Choose from Media Library</span>
+        </button>
+      )}
+
       {/* Main Upload Drop Area */}
       {!url ? (
         <div
@@ -130,10 +178,10 @@ export default function FeaturedImageUploader({
             <div className="uploader-empty-state">
               <Upload size={32} />
               <p className="uploader-text">
-                <span>Click to upload</span> or drag and drop
+                <span>Click to upload new image</span>
               </p>
               <p className="uploader-hint">
-                WebP, PNG, JPG accepted (Large images resized to 1600px)
+                WebP, PNG, JPG accepted (Max 5MB, resized to 1600px)
               </p>
             </div>
           )}
@@ -154,25 +202,24 @@ export default function FeaturedImageUploader({
         </div>
       )}
 
-      {/* Local Component Errors */}
+      {/* Component Errors */}
       {localError && (
-        <div className="validation-error-text" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div className="validation-error-text" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
           <AlertCircle size={14} />
           <span>{localError}</span>
         </div>
       )}
 
-      {/* RHF External URL Error */}
       {errorUrl && !localError && (
-        <div className="validation-error-text" style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+        <div className="validation-error-text" style={{ display: 'flex', alignItems: 'center', gap: '6px', marginTop: '6px' }}>
           <AlertCircle size={14} />
           <span>{errorUrl.message}</span>
         </div>
       )}
 
-      {/* Alternative Text Field (Required if image exists) */}
+      {/* Alternative Text Field */}
       {url && (
-        <div className={`editor-form-group ${errorAlt ? 'has-error' : ''}`}>
+        <div className={`editor-form-group ${errorAlt ? 'has-error' : ''}`} style={{ marginTop: '12px' }}>
           <label htmlFor="featured_image_alt">Image Alt Text (Required)</label>
           <input
             id="featured_image_alt"
@@ -193,6 +240,19 @@ export default function FeaturedImageUploader({
             </div>
           )}
         </div>
+      )}
+
+      {/* Media Library Picker Modal */}
+      {isPickerOpen && (
+        <MediaPickerModal
+          onClose={() => setIsPickerOpen(false)}
+          onSelect={({ url: selectedUrl, alt: selectedAlt }) => {
+            onChangeUrl(selectedUrl)
+            if (selectedAlt && !alt) {
+              onChangeAlt(selectedAlt)
+            }
+          }}
+        />
       )}
     </div>
   )

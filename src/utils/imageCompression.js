@@ -7,7 +7,7 @@
  * @param {File} file - The original uploaded image File object
  * @param {number} maxWidth - Maximum width boundary (default 1600)
  * @param {number} quality - WebP quality compression ratio (default 0.82)
- * @returns {Promise<Blob>} - Resolves with compressed WebP Blob
+ * @returns {Promise<{ blob: Blob, width: number, height: number }>} - Resolves with compressed WebP Blob and dimensions
  */
 export async function compressImage(file, maxWidth = 1600, quality = 0.82) {
   return new Promise((resolve, reject) => {
@@ -44,7 +44,7 @@ export async function compressImage(file, maxWidth = 1600, quality = 0.82) {
         canvas.toBlob(
           (blob) => {
             if (blob) {
-              resolve(blob)
+              resolve({ blob, width, height })
             } else {
               reject(new Error('Canvas WebP export failed.'))
             }
@@ -63,4 +63,36 @@ export async function compressImage(file, maxWidth = 1600, quality = 0.82) {
     }
     reader.readAsDataURL(file)
   })
+}
+
+/**
+ * Extract pixel dimensions (width & height) from an Image File or Blob.
+ */
+export function getImageDimensions(fileOrBlob) {
+  return new Promise((resolve) => {
+    const img = new Image()
+    const url = URL.createObjectURL(fileOrBlob)
+    img.onload = () => {
+      const width = img.width
+      const height = img.height
+      URL.revokeObjectURL(url)
+      resolve({ width, height })
+    }
+    img.onerror = () => {
+      URL.revokeObjectURL(url)
+      resolve({ width: null, height: null })
+    }
+    img.src = url
+  })
+}
+
+/**
+ * Format bytes to human readable string (KB, MB).
+ */
+export function formatBytes(bytes) {
+  if (!bytes || isNaN(bytes)) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
 }
