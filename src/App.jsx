@@ -17,6 +17,8 @@ import ActivityLogPage from './pages/ActivityLogPage'
 import ProfilePage from './pages/ProfilePage'
 import TrashPostsPage from './pages/TrashPostsPage'
 
+import ErrorBoundary from './components/ErrorBoundary'
+
 export default function App() {
   return (
     <AuthProvider>
@@ -43,8 +45,22 @@ export default function App() {
             {/* Content-Management Module routes (all authenticated users) */}
             <Route path="posts" element={<PostsPage />} />
             <Route path="posts/trash" element={<TrashPostsPage />} />
-            <Route path="posts/new" element={<PostEditorPage />} />
-            <Route path="posts/:id/edit" element={<PostEditorPage />} />
+            <Route
+              path="posts/new"
+              element={
+                <ErrorBoundary>
+                  <PostEditorPage />
+                </ErrorBoundary>
+              }
+            />
+            <Route
+              path="posts/:id/edit"
+              element={
+                <ErrorBoundary>
+                  <PostEditorPage />
+                </ErrorBoundary>
+              }
+            />
 
             {/* Profile & Account Settings (all authenticated roles) */}
             <Route path="profile" element={<ProfilePage />} />

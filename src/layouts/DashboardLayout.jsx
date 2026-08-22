@@ -4,6 +4,8 @@ import Sidebar from '../components/dashboard/Sidebar'
 import DashboardHeader from '../components/dashboard/DashboardHeader'
 import '../styles/dashboard.css'
 
+import ErrorBoundary from '../components/ErrorBoundary'
+
 export default function DashboardLayout() {
   const [isCollapsed, setIsCollapsed] = useState(false)
   const [isMobileOpen, setIsMobileOpen] = useState(false)
@@ -33,7 +35,9 @@ export default function DashboardLayout() {
       <div className="dashboard-container-main">
         <DashboardHeader onMenuToggle={() => setIsMobileOpen(true)} />
         <main className="dashboard-content-area">
-          <Outlet />
+          <ErrorBoundary>
+            <Outlet />
+          </ErrorBoundary>
         </main>
       </div>
     </div>

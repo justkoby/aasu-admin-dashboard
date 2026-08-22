@@ -1,5 +1,5 @@
--- Migration 008_post_trash_and_soft_delete.sql
--- Description: Security audited post soft delete, trash management, RLS policies, and activity logging.
+-- Migration 0009_post_trash_and_soft_delete.sql
+-- Description: Security-audited post soft delete, trash management, RLS policies, and activity logging.
 
 BEGIN;
 
@@ -25,13 +25,14 @@ ALTER TABLE public.posts
   DROP CONSTRAINT IF EXISTS chk_posts_status_before_delete;
 ALTER TABLE public.posts
   ADD CONSTRAINT chk_posts_status_before_delete
-  CHECK (status_before_delete IS NULL OR status_before_delete IN ('draft', 'in_review', 'published', 'archived', 'revision_requested', 'rejected'));
+  CHECK (status_before_delete IS NULL OR status_before_delete IN ('draft', 'in_review', 'published', 'archived', 'revision_requested', 'rejected', 'review', 'pending'));
 
--- Indexes for performance on soft-deleted post queries
+-- Performance indexes for soft-deleted & status post queries
 CREATE INDEX IF NOT EXISTS idx_posts_deleted_at ON public.posts(deleted_at);
 CREATE INDEX IF NOT EXISTS idx_posts_deleted_by ON public.posts(deleted_by);
+CREATE INDEX IF NOT EXISTS idx_posts_status_deleted_at ON public.posts(status, deleted_at);
 
--- 3. Public Read Policies & Restrictive Policy Audit
+-- 3. Public Read Policies & Restrictive Security Audit
 -- A. Update Permissive Public Read Policy for Published Posts
 DROP POLICY IF EXISTS "public_select_published_posts" ON public.posts;
 CREATE POLICY "public_select_published_posts"
@@ -44,7 +45,7 @@ USING (
   AND deleted_at IS NULL
 );
 
--- B. Add RESTRICTIVE Policy for Anonymous Users (Guarantees deleted_at IS NULL is ALWAYS enforced regardless of permissive policies)
+-- B. Add RESTRICTIVE Policy for Anonymous Users (Guarantees deleted_at IS NULL is ALWAYS enforced for anon viewers)
 DROP POLICY IF EXISTS "anon_exclude_deleted_posts_restrictive" ON public.posts;
 CREATE POLICY "anon_exclude_deleted_posts_restrictive"
 ON public.posts
@@ -54,37 +55,14 @@ USING (
   deleted_at IS NULL
 );
 
--- C. Update Post Categories Public Read Policy
-DROP POLICY IF EXISTS "public_select_post_categories" ON public.post_categories;
-CREATE POLICY "public_select_post_categories"
-ON public.post_categories
-FOR SELECT
-TO anon, authenticated
-USING (
-  EXISTS (
-    SELECT 1 FROM public.posts p
-    WHERE p.id = post_categories.post_id
-      AND p.status = 'published'
-      AND p.published_at <= now()
-      AND p.deleted_at IS NULL
-  )
-);
-
--- D. Update Post Gallery Images Public Read Policy
-DROP POLICY IF EXISTS "public_select_published_gallery_images" ON public.post_gallery_images;
-CREATE POLICY "public_select_published_gallery_images"
-ON public.post_gallery_images
-FOR SELECT
-TO anon, authenticated
-USING (
-  EXISTS (
-    SELECT 1 FROM public.posts p
-    WHERE p.id = post_gallery_images.post_id
-      AND p.status = 'published'
-      AND p.published_at <= now()
-      AND p.deleted_at IS NULL
-  )
-);
+-- C. Update Post Categories Public Read Policy (if post_categories table exists)
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'post_categories') THEN
+    EXECUTE 'DROP POLICY IF EXISTS "public_select_post_categories" ON public.post_categories';
+    EXECUTE 'CREATE POLICY "public_select_post_categories" ON public.post_categories FOR SELECT TO anon, authenticated USING (EXISTS (SELECT 1 FROM public.posts p WHERE p.id = post_categories.post_id AND p.status = ''published'' AND p.published_at <= now() AND p.deleted_at IS NULL))';
+  END IF;
+END $$;
 
 -- 4. Authenticated User Policies for Posts Table
 
@@ -176,7 +154,7 @@ CREATE OR REPLACE FUNCTION public.trash_post(p_post_id UUID)
 RETURNS public.posts
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_user_id UUID;
@@ -257,7 +235,7 @@ CREATE OR REPLACE FUNCTION public.restore_post(p_post_id UUID)
 RETURNS public.posts
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_user_id UUID;
@@ -306,7 +284,7 @@ BEGIN
       WHERE sa.supervisor_id = v_user_id
         AND sa.contributor_id = v_post.author_id
         AND sa.is_active = true
-    ) THEN
+    ) AND COALESCE(v_post.assigned_reviewer_id, '00000000-0000-0000-0000-000000000000'::uuid) <> v_user_id THEN
       RAISE EXCEPTION 'Supervisors can only restore team posts';
     END IF;
   ELSIF v_user_role NOT IN ('super_admin', 'communications_admin') THEN
@@ -340,7 +318,7 @@ CREATE OR REPLACE FUNCTION public.permanently_delete_post(p_post_id UUID)
 RETURNS JSONB
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   v_user_id UUID;
@@ -380,10 +358,13 @@ BEGIN
       RAISE EXCEPTION 'Multiple posts matched ID %', p_post_id;
   END;
 
-  -- Delete dependent relations (media_assets and Supabase Storage objects are preserved!)
-  DELETE FROM public.post_categories WHERE post_id = p_post_id;
-  DELETE FROM public.post_gallery_images WHERE post_id = p_post_id;
-  DELETE FROM public.review_notes WHERE post_id = p_post_id;
+  -- Delete dependent relations safely (only if tables exist, preserving media_assets & storage objects!)
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'post_categories') THEN
+    DELETE FROM public.post_categories WHERE post_id = p_post_id;
+  END IF;
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'review_notes') THEN
+    DELETE FROM public.review_notes WHERE post_id = p_post_id;
+  END IF;
 
   -- Build metadata before row removal so activity logs remain readable
   v_meta := jsonb_build_object(
@@ -414,7 +395,7 @@ CREATE OR REPLACE FUNCTION public.log_posts_activity()
 RETURNS TRIGGER
 LANGUAGE plpgsql
 SECURITY DEFINER
-SET search_path = public
+SET search_path = public, pg_temp
 AS $$
 DECLARE
   acting_user_id UUID;
@@ -495,7 +476,12 @@ BEGIN
       )
     );
   END IF;
-  RETURN NEW;
+
+  IF TG_OP = 'DELETE' THEN
+    RETURN OLD;
+  ELSE
+    RETURN NEW;
+  END IF;
 END;
 $$;
 

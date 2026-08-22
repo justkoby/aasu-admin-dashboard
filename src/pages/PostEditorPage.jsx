@@ -1,5 +1,5 @@
 import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate, Link } from 'react-router-dom'
+import { useParams, useNavigate } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { useAuth } from '../context/AuthContext'
@@ -7,7 +7,6 @@ import { supabase } from '../lib/supabaseClient'
 import { postSchema } from '../utils/validationSchemas'
 import { createSlug } from '../utils/createSlug'
 import FeaturedImageUploader from '../components/posts/FeaturedImageUploader'
-import PostGalleryManager from '../components/posts/PostGalleryManager'
 import RichTextEditor from '../components/posts/RichTextEditor'
 import SubmissionModal from '../components/posts/SubmissionModal'
 import TrashConfirmModal from '../components/posts/TrashConfirmModal'
@@ -24,7 +23,8 @@ import {
   MessageSquareText,
   ChevronDown,
   ChevronUp,
-  Trash2
+  Trash2,
+  RefreshCw
 } from 'lucide-react'
 import '../styles/posts.css'
 
@@ -41,14 +41,15 @@ const logSaveError = (operation, err, payload = {}) => {
 }
 
 export default function PostEditorPage() {
+  // ── Top-Level Router Hooks ──
   const { id } = useParams()
   const navigate = useNavigate()
   const isEditMode = Boolean(id)
 
+  // ── Top-Level Auth & Role Hooks ──
   const { user, profile, loading: authLoading } = useAuth()
   const userRole = (profile?.role || '').toLowerCase()
 
-  // Explicit role booleans
   const isSuperAdmin = userRole === 'super_admin'
   const isCommunicationsAdmin = userRole === 'communications_admin'
   const isSupervisor = userRole === 'supervisor'
@@ -57,12 +58,13 @@ export default function PostEditorPage() {
   const canPublishDirectly = isSuperAdmin || isCommunicationsAdmin || isSupervisor
   const canManageHero = isSuperAdmin || isCommunicationsAdmin
 
-  // Component States
+  // ── Top-Level Component State Hooks (MUST be unconditional at top) ──
   const [categories, setCategories] = useState([])
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([])
   const [originalPost, setOriginalPost] = useState(null)
   const [postLoaded, setPostLoaded] = useState(!isEditMode)
   const [permissionDenied, setPermissionDenied] = useState(false)
+  const [loadError, setLoadError] = useState(null)
 
   // Editorial feedback notes attached to a returned draft
   const [reviewNotes, setReviewNotes] = useState([])
@@ -80,9 +82,13 @@ export default function PostEditorPage() {
   const [isLoading, setIsLoading] = useState(isEditMode)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [saveStatus, setSaveStatus] = useState(null)
-  const [galleryImages, setGalleryImages] = useState([])
 
-  // React Hook Form initialization
+  // Trash handling state hooks
+  const [postToTrash, setPostToTrash] = useState(null)
+  const [isTrashing, setIsTrashing] = useState(false)
+  const [trashError, setTrashError] = useState(null)
+
+  // ── Top-Level Form Hooks ──
   const {
     register,
     handleSubmit,
@@ -115,6 +121,7 @@ export default function PostEditorPage() {
 
   const watchTitle = watch('title')
 
+  // ── Top-Level Effect Hooks ──
   // Auto-generate URL slug from Title on initial post creation
   useEffect(() => {
     if (!isEditMode && watchTitle) {
@@ -132,10 +139,11 @@ export default function PostEditorPage() {
         setIsLoading(true)
         setPostLoaded(false)
         setPermissionDenied(false)
+        setLoadError(null)
       }
 
       try {
-        // 1. Fetch Categories
+        // 1. Fetch Categories safely
         let { data: catData, error: catErr } = await supabase
           .from('categories')
           .select('id, name, is_active')
@@ -152,7 +160,7 @@ export default function PostEditorPage() {
 
         if (catErr) {
           logSaveError('categories.select', catErr)
-        } else if (isMounted && catData) {
+        } else if (isMounted && Array.isArray(catData)) {
           setCategories(catData)
         }
 
@@ -165,27 +173,8 @@ export default function PostEditorPage() {
             .single()
 
           if (postErr) {
-            console.error('[AASU CMS Post Fetch Error]', {
-              code: postErr.code ?? null,
-              message: postErr.message ?? null,
-              details: postErr.details ?? null,
-              hint: postErr.hint ?? null,
-              postId: id,
-              errorObj: postErr
-            })
+            logSaveError('posts.select', postErr, { postId: id })
             throw postErr
-          }
-
-          if (import.meta.env.DEV && postData) {
-            console.log('[AASU CMS Post Fetch Diagnostics]', {
-              postId: postData.id,
-              hasContent: Boolean(postData.content),
-              contentLength: postData.content ? postData.content.length : 0,
-              hasFeaturedImage: Boolean(postData.featured_image_url),
-              featuredImageUrl: postData.featured_image_url || null,
-              authorId: postData.author_id,
-              status: postData.status
-            })
           }
 
           if (isMounted && postData) {
@@ -195,10 +184,9 @@ export default function PostEditorPage() {
             if (isSuperAdmin || isCommunicationsAdmin) {
               isAuthorizedToEdit = true
             } else if (isSupervisor) {
-              if (postData.author_id === user.id || postData.assigned_reviewer_id === user.id) {
+              if (postData.author_id === user?.id || postData.assigned_reviewer_id === user?.id) {
                 isAuthorizedToEdit = true
-              } else {
-                // Check if an active supervisor assignment exists
+              } else if (user?.id) {
                 const { data: assignment } = await supabase
                   .from('supervisor_assignments')
                   .select('id')
@@ -211,7 +199,7 @@ export default function PostEditorPage() {
                 }
               }
             } else if (isContributor) {
-              if (postData.author_id === user.id) {
+              if (postData.author_id === user?.id) {
                 isAuthorizedToEdit = true
               }
             }
@@ -224,55 +212,61 @@ export default function PostEditorPage() {
 
             setOriginalPost(postData)
 
-            // Populate form fields with existing post values
-            reset({
-              title: postData.title || '',
-              slug: postData.slug || '',
-              excerpt: postData.excerpt || '',
-              content: postData.content || '',
-              featured_image_url: postData.featured_image_url || '',
-              featured_image_alt: postData.featured_image_alt || '',
-              type: postData.type || 'news',
-              region: postData.region || '',
-              theme: postData.theme || '',
-              hero_position: postData.hero_position || 'none',
-              featured_until: postData.featured_until
-                ? postData.featured_until.split('T')[0]
-                : '',
-              seo_title: postData.seo_title || '',
-              seo_description: postData.seo_description || '',
-              reference_number: postData.reference_number || '',
-              external_url: postData.external_url || '',
-              redirect_url: postData.redirect_url || ''
-            })
-
-            // Fetch attached Gallery Images
-            try {
-              const { data: gData } = await supabase
-                .from('post_gallery_images')
-                .select('*')
-                .eq('post_id', id)
-                .order('sort_order', { ascending: true })
-              if (isMounted && gData) setGalleryImages(gData)
-            } catch (gErr) {
-              console.warn('Gallery images fetch warning:', gErr)
+            // Safe normalization for nullable values
+            let formattedFeaturedUntil = ''
+            if (postData.featured_until) {
+              try {
+                const dateObj = new Date(postData.featured_until)
+                if (!isNaN(dateObj.getTime())) {
+                  formattedFeaturedUntil = dateObj.toISOString().split('T')[0]
+                }
+              } catch (e) {
+                formattedFeaturedUntil = ''
+              }
             }
+
+            const safeHeroPosition = (postData.hero_position && ['none', 'primary', 'secondary'].includes(postData.hero_position))
+              ? postData.hero_position
+              : 'none'
+
+            reset({
+              title: postData.title ?? '',
+              slug: postData.slug ?? (postData.title ? createSlug(postData.title) : `event-${id}`),
+              excerpt: postData.excerpt ?? '',
+              content: postData.content ?? '',
+              featured_image_url: postData.featured_image_url ?? '',
+              featured_image_alt: postData.featured_image_alt ?? '',
+              type: postData.type ?? 'news',
+              region: postData.region ?? '',
+              theme: postData.theme ?? '',
+              hero_position: safeHeroPosition,
+              featured_until: formattedFeaturedUntil,
+              seo_title: postData.seo_title ?? '',
+              seo_description: postData.seo_description ?? '',
+              reference_number: postData.reference_number ?? '',
+              external_url: postData.external_url ?? '',
+              redirect_url: postData.redirect_url ?? ''
+            })
 
             setPostLoaded(true)
 
-            // Fetch attached Category IDs
-            const { data: pcData, error: pcErr } = await supabase
-              .from('post_categories')
-              .select('category_id')
-              .eq('post_id', id)
+            // Fetch attached Category IDs safely
+            try {
+              const { data: pcData, error: pcErr } = await supabase
+                .from('post_categories')
+                .select('category_id')
+                .eq('post_id', id)
 
-            if (pcErr) {
-              logSaveError('post_categories.select', pcErr, { id })
-            } else if (isMounted && pcData) {
-              setSelectedCategoryIds(pcData.map((item) => item.category_id))
+              if (pcErr) {
+                logSaveError('post_categories.select', pcErr, { id })
+              } else if (isMounted && Array.isArray(pcData)) {
+                setSelectedCategoryIds(pcData.map((item) => item.category_id).filter(Boolean))
+              }
+            } catch (pcEx) {
+              console.warn('[AASU CMS] Category ids lookup warning:', pcEx)
             }
 
-            // Fetch attached Review Notes
+            // Fetch attached Review Notes safely
             try {
               let notesResult = await supabase
                 .from('review_notes')
@@ -288,21 +282,18 @@ export default function PostEditorPage() {
                   .order('created_at', { ascending: false })
               }
 
-              if (isMounted && notesResult.data) {
+              if (isMounted && Array.isArray(notesResult.data)) {
                 setReviewNotes(notesResult.data)
               }
             } catch (notesErr) {
-              console.warn('Could not load review notes for draft editor:', notesErr)
+              console.warn('[AASU CMS] Could not load review notes:', notesErr)
             }
           }
         }
       } catch (err) {
-        console.error('Error initializing post editor:', err)
+        console.error('[AASU CMS] Error initializing post editor:', err)
         if (isMounted) {
-          setSaveStatus({
-            type: 'error',
-            message: 'Failed to load post details for editing. Please check your connection.'
-          })
+          setLoadError(err.message || 'Failed to load post details for editing. Please verify database connection.')
         }
       } finally {
         if (isMounted) setIsLoading(false)
@@ -361,7 +352,7 @@ export default function PostEditorPage() {
     const isSupervisorPublish = isSupervisor && statusAction === 'publish'
 
     try {
-      const currentSlug = formValues.slug.toLowerCase().trim()
+      const currentSlug = (formValues.slug || '').toLowerCase().trim()
 
       // 1. Slug collision check
       let query = supabase.from('posts').select('id').eq('slug', currentSlug)
@@ -390,13 +381,13 @@ export default function PostEditorPage() {
 
       // 2. Build Database columns payload
       const contentFields = {
-        title: formValues.title,
+        title: formValues.title ?? '',
         slug: currentSlug,
-        excerpt: formValues.excerpt,
-        content: formValues.content,
-        featured_image_url: formValues.featured_image_url,
-        featured_image_alt: formValues.featured_image_alt,
-        type: formValues.type,
+        excerpt: formValues.excerpt ?? '',
+        content: formValues.content ?? '',
+        featured_image_url: formValues.featured_image_url ?? '',
+        featured_image_alt: formValues.featured_image_alt ?? '',
+        type: formValues.type ?? 'news',
         region: formValues.region || null,
         theme: formValues.theme || null,
         seo_title: formValues.seo_title || null,
@@ -492,13 +483,7 @@ export default function PostEditorPage() {
         const { data, error: updateErr } = await updateQuery.select().single()
 
         if (updateErr) {
-          console.error({
-            code: updateErr.code,
-            message: updateErr.message,
-            details: updateErr.details,
-            hint: updateErr.hint,
-            payload
-          })
+          logSaveError('posts.update', updateErr, payload)
           throw updateErr
         }
         savedPost = data
@@ -510,13 +495,7 @@ export default function PostEditorPage() {
           .single()
         
         if (insertErr) {
-          console.error({
-            code: insertErr.code,
-            message: insertErr.message,
-            details: insertErr.details,
-            hint: insertErr.hint,
-            payload
-          })
+          logSaveError('posts.insert', insertErr, payload)
           throw insertErr
         }
         savedPost = data
@@ -541,7 +520,7 @@ export default function PostEditorPage() {
           .single()
 
         if (pubErr) {
-          console.error('[AASU CMS] Supervisor publish update failed:', pubErr)
+          logSaveError('posts.update (supervisor publish)', pubErr)
           publicationFailedAfterDraft = true
         } else if (pubData) {
           savedPost = pubData
@@ -568,7 +547,7 @@ export default function PostEditorPage() {
           .eq('author_id', authenticatedUser.id)
 
         if (submitUpdateErr) {
-          console.error('[AASU CMS] Contributor submission update failed:', submitUpdateErr)
+          logSaveError('posts.update (contributor submit)', submitUpdateErr)
           submissionFailedAfterDraft = true
         }
       }
@@ -603,14 +582,13 @@ export default function PostEditorPage() {
       }
 
       // 4. Save Category Assignments safely
-      let categoryAssignmentSuccess = true
       try {
         const { error: clearErr } = await supabase
           .from('post_categories')
           .delete()
           .eq('post_id', savedPost.id)
         
-        if (clearErr) throw clearErr
+        if (clearErr) logSaveError('post_categories.delete', clearErr)
 
         if (selectedCategoryIds.length > 0) {
           const mappings = selectedCategoryIds.map((catId) => ({
@@ -618,34 +596,10 @@ export default function PostEditorPage() {
             category_id: catId
           }))
           const { error: mapErr } = await supabase.from('post_categories').insert(mappings)
-          if (mapErr) throw mapErr
+          if (mapErr) logSaveError('post_categories.insert', mapErr)
         }
       } catch (catErr) {
-        logSaveError('post_categories.delete/insert (category assignment)', catErr, {
-          post_id: savedPost?.id ?? null,
-          category_ids: selectedCategoryIds
-        })
-        categoryAssignmentSuccess = false
-      }
-
-      // 4b. Save Gallery Images safely
-      try {
-        await supabase.from('post_gallery_images').delete().eq('post_id', savedPost.id)
-        if (galleryImages.length > 0) {
-          const galleryPayload = galleryImages.map((img, idx) => ({
-            post_id: savedPost.id,
-            media_asset_id: img.media_asset_id || null,
-            image_url: img.image_url,
-            storage_path: img.storage_path || null,
-            alt_text: img.alt_text || null,
-            caption: img.caption || null,
-            sort_order: idx
-          }))
-          const { error: gErr } = await supabase.from('post_gallery_images').insert(galleryPayload)
-          if (gErr) logSaveError('post_gallery_images.insert', gErr, { post_id: savedPost.id })
-        }
-      } catch (gErr) {
-        console.warn('Post gallery images save warning:', gErr)
+        console.warn('[AASU CMS] Category assignment warning:', catErr)
       }
 
       // 5. Report save state & Navigation
@@ -685,7 +639,7 @@ export default function PostEditorPage() {
       }
       return true
     } catch (err) {
-      console.error('Post save failed:', err)
+      console.error('[AASU CMS] Post save failed:', err)
 
       const isNetworkErr =
         err.message?.toLowerCase().includes('failed to fetch') ||
@@ -721,10 +675,10 @@ export default function PostEditorPage() {
       const { data: assignments, error: assErr } = await supabase
         .from('supervisor_assignments')
         .select('supervisor_id, supervisor:profiles!supervisor_assignments_supervisor_id_fkey(id, full_name, email)')
-        .eq('contributor_id', user.id)
+        .eq('contributor_id', user?.id)
         .eq('is_active', true)
 
-      if (!assErr && assignments) {
+      if (!assErr && Array.isArray(assignments)) {
         const svs = assignments
           .map(a => a.supervisor)
           .filter(Boolean)
@@ -742,7 +696,7 @@ export default function PostEditorPage() {
         setSelectedSupervisorId('')
       }
     } catch (e) {
-      console.warn('Supervisor assignment lookup failed:', e)
+      console.warn('[AASU CMS] Supervisor assignment lookup failed:', e)
       setSupervisors([])
       setSelectedSupervisorId('')
     } finally {
@@ -769,11 +723,102 @@ export default function PostEditorPage() {
     await handleSavePost(formValues, 'publish')
   }
 
+  // Trash confirm handler
+  const handleConfirmTrash = async (post) => {
+    setIsTrashing(true)
+    setTrashError(null)
+    try {
+      let trashedRow = null
+      const { data: rpcData, error: rpcErr } = await supabase.rpc('trash_post', {
+        p_post_id: post.id
+      })
+
+      if (rpcErr) {
+        logSaveError('trash_post.rpc', rpcErr)
+        const { data: updateData, error: updateErr } = await supabase
+          .from('posts')
+          .update({
+            status_before_delete: post.status,
+            status: 'archived',
+            deleted_at: new Date().toISOString(),
+            deleted_by: user?.id || null,
+            hero_position: 'none',
+            featured_until: null,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', post.id)
+          .select('id, title')
+          .single()
+
+        if (updateErr) throw updateErr
+        trashedRow = updateData
+      } else {
+        trashedRow = rpcData
+      }
+
+      setPostToTrash(null)
+      const targetRoute = isSupervisor ? '/dashboard/team-posts' : '/dashboard/posts'
+      navigate(targetRoute, {
+        state: { type: 'success', message: `Moved ‘${post?.title || 'Untitled'}’ to Trash successfully.` }
+      })
+    } catch (err) {
+      console.error('[AASU CMS] Error moving post to trash:', err)
+      setTrashError(err)
+    } finally {
+      setIsTrashing(false)
+    }
+  }
+
+  // ── Derived Variables (Safe calculation after all hooks) ──
+  const canTrashCurrentPost = isEditMode && originalPost && canTrashPost(userRole, user?.id, originalPost, [])
+  const safeReviewNotes = Array.isArray(reviewNotes) ? reviewNotes : []
+  const latestOwnNote = safeReviewNotes.find((n) => (n.note_type || 'reviewer_feedback') === 'contributor_note')
+  const latestReviewerNote = safeReviewNotes.find((n) => (n.note_type || 'reviewer_feedback') === 'reviewer_feedback')
+  const olderNotes = safeReviewNotes.slice(1)
+
+  // ── Conditional UI Returns (SAFE because ALL hooks have executed unconditionally above) ──
   if (authLoading || isLoading) {
     return (
       <div className="auth-loader-container">
         <div className="auth-loader"></div>
         <p>Loading Editor...</p>
+      </div>
+    )
+  }
+
+  if (loadError) {
+    return (
+      <div className="dashboard-content-wrapper">
+        <div className="error-state" style={{ textAlign: 'center', maxWidth: '540px', margin: '40px auto' }}>
+          <AlertTriangle size={48} className="error-state-icon" style={{ color: '#DC2626', marginBottom: '16px' }} />
+          <h3 style={{ fontSize: '20px', fontWeight: 800, color: 'var(--dash-navy)' }}>
+            Failed to Load Post
+          </h3>
+          <p style={{ fontSize: '14px', color: 'var(--dash-text-secondary)', marginBottom: '24px', lineHeight: 1.5 }}>
+            {loadError}
+          </p>
+          <div style={{ display: 'flex', gap: '12px', justifyContent: 'center' }}>
+            <button
+              type="button"
+              className="retry-btn"
+              onClick={() => {
+                setLoadError(null)
+                setIsLoading(true)
+              }}
+            >
+              <RefreshCw size={14} />
+              <span>Retry</span>
+            </button>
+            <button
+              type="button"
+              className="edit-action-btn"
+              onClick={() => navigate(isSupervisor ? '/dashboard/team-posts' : '/dashboard/posts')}
+            >
+              <ArrowLeft size={14} />
+              <span>Back to Posts</span>
+            </button>
+          </div>
+        </div>
       </div>
     )
   }
@@ -834,62 +879,6 @@ export default function PostEditorPage() {
     )
   }
 
-  const latestOwnNote = reviewNotes.find((n) => (n.note_type || 'reviewer_feedback') === 'contributor_note')
-  const latestReviewerNote = reviewNotes.find((n) => (n.note_type || 'reviewer_feedback') === 'reviewer_feedback')
-  const olderNotes = reviewNotes.slice(1)
-
-  // Trash handling state
-  const [postToTrash, setPostToTrash] = useState(null)
-  const [isTrashing, setIsTrashing] = useState(false)
-  const [trashError, setTrashError] = useState(null)
-
-  const handleConfirmTrash = async (post) => {
-    setIsTrashing(true)
-    setTrashError(null)
-    try {
-      let trashedRow = null
-      const { data: rpcData, error: rpcErr } = await supabase.rpc('trash_post', {
-        p_post_id: post.id
-      })
-
-      if (rpcErr) {
-        console.warn('trash_post RPC fallback:', rpcErr)
-        const { data: updateData, error: updateErr } = await supabase
-          .from('posts')
-          .update({
-            status_before_delete: post.status,
-            status: 'archived',
-            deleted_at: new Date().toISOString(),
-            deleted_by: user.id,
-            hero_position: 'none',
-            featured_until: null,
-            updated_at: new Date().toISOString()
-          })
-          .eq('id', post.id)
-          .select('id, title')
-          .single()
-
-        if (updateErr) throw updateErr
-        trashedRow = updateData
-      } else {
-        trashedRow = rpcData
-      }
-
-      setPostToTrash(null)
-      const targetRoute = isSupervisor ? '/dashboard/team-posts' : '/dashboard/posts'
-      navigate(targetRoute, {
-        state: { type: 'success', message: `Moved ‘${post.title || 'Untitled'}’ to Trash successfully.` }
-      })
-    } catch (err) {
-      console.error('Error moving post to trash:', err)
-      setTrashError(err)
-    } finally {
-      setIsTrashing(false)
-    }
-  }
-
-  const canTrashCurrentPost = isEditMode && originalPost && canTrashPost(userRole, user?.id, originalPost, [])
-
   return (
     <div className="dashboard-content-wrapper">
       {/* Editor Header Navigation */}
@@ -941,7 +930,7 @@ export default function PostEditorPage() {
       )}
 
       {/* Requested Changes Feedback Panel (drafts with review notes only) */}
-      {isEditMode && reviewNotes.length > 0 && (
+      {isEditMode && safeReviewNotes.length > 0 && (
         <div className="editor-feedback-panel">
           <div className="editor-feedback-header">
             <MessageSquareText size={20} className="editor-feedback-icon" />
@@ -1073,14 +1062,6 @@ export default function PostEditorPage() {
                 )}
               </div>
             </div>
-
-            {/* Card: Additional Gallery Images */}
-            <div className="editor-card">
-              <PostGalleryManager
-                galleryImages={galleryImages}
-                onChangeGalleryImages={setGalleryImages}
-              />
-            </div>
           </div>
 
           {/* ---------------- Right: Metadata & Settings Column ---------------- */}
@@ -1134,7 +1115,7 @@ export default function PostEditorPage() {
               </div>
 
               {/* Reference Number (Press Release / Readout / Event) */}
-              {['press_release', 'readout', 'event'].includes((watch('type') || '').toLowerCase()) && (
+              {['press_release', 'readout', 'event'].includes(((watch('type') || '').toLowerCase())) && (
                 <div className="editor-form-group">
                   <label htmlFor="reference_number">Official Reference Number</label>
                   <input
@@ -1406,4 +1387,3 @@ export default function PostEditorPage() {
     </div>
   )
 }
-
