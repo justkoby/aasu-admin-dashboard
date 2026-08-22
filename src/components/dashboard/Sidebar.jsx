@@ -14,7 +14,8 @@ import {
   User,
   ChevronLeft,
   ChevronRight,
-  X
+  X,
+  Briefcase
 } from 'lucide-react'
 
 export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, onCloseMobile }) {
@@ -22,10 +23,9 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
   const location = useLocation()
   const userRole = profile?.role || 'contributor'
   const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
+  const isSupervisor = userRole === 'supervisor'
 
-  // Notification count for the sidebar badge:
-  // - Administrators: posts awaiting review
-  // - Contributors: own draft posts that carry review notes (changes requested)
+  // Review / feedback badge count
   const [reviewCount, setReviewCount] = useState(0)
 
   useEffect(() => {
@@ -33,42 +33,40 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
 
     const fetchBadgeCount = async () => {
       if (isAdminRole) {
+        // Admin: all posts awaiting review
         const { count, error } = await supabase
           .from('posts')
           .select('id', { count: 'exact', head: true })
           .eq('status', 'in_review')
-
-        if (!error && isMounted) {
-          setReviewCount(count || 0)
-        }
+        if (!error && isMounted) setReviewCount(count || 0)
+      } else if (isSupervisor && profile?.id) {
+        // Supervisor: posts assigned to them specifically
+        const { count, error } = await supabase
+          .from('posts')
+          .select('id', { count: 'exact', head: true })
+          .eq('status', 'in_review')
+          .eq('assigned_reviewer_id', profile.id)
+        if (!error && isMounted) setReviewCount(count || 0)
       } else if (profile?.id) {
-        // Contributor: drafts with at least one review note
+        // Contributor: own drafts with review notes (changes requested)
         const { data, error } = await supabase
           .from('posts')
           .select('id, review_notes!inner(id)')
           .eq('author_id', profile.id)
           .eq('status', 'draft')
-
-        if (isMounted) {
-          setReviewCount(error ? 0 : (data || []).length)
-        }
+        if (isMounted) setReviewCount(error ? 0 : (data || []).length)
       }
     }
 
     fetchBadgeCount()
-    return () => {
-      isMounted = false
-    }
-    // Re-count whenever the user navigates so the badge stays fresh
-  }, [isAdminRole, profile?.id, location.pathname])
+    return () => { isMounted = false }
+  }, [isAdminRole, isSupervisor, profile?.id, location.pathname])
 
-  // Helper to determine if link is active in routing
   const isActive = (path) => location.pathname === path
 
-  // Helper to render sidebar items
   const renderItem = (label, icon, path, comingNext = false, count = 0, badgeTitle = 'Items needing attention') => {
     const active = isActive(path)
-    
+
     const content = (
       <>
         <div className="sidebar-nav-item-content">
@@ -110,11 +108,10 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
     )
   }
 
-  // Get navigation links based on user role
   const getNavSections = () => {
     const sections = []
 
-    // 1. Overview Section (Available to all)
+    // ── Overview (all roles) ──
     sections.push({
       label: 'Overview',
       items: [
@@ -127,18 +124,25 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
       ]
     })
 
-    // 2. Content Section
+    // ── Content ──
     const contentItems = []
-    
-    if (userRole === 'super_admin' || userRole === 'communications_admin') {
+
+    if (isAdminRole) {
       contentItems.push({
         label: 'All Posts',
         icon: <FileText size={20} className="sidebar-icon" />,
         path: '/dashboard/posts',
         comingNext: false
       })
+    } else if (isSupervisor) {
+      contentItems.push({
+        label: 'Team Posts',
+        icon: <Briefcase size={20} className="sidebar-icon" />,
+        path: '/dashboard/team-posts',
+        comingNext: false
+      })
     } else {
-      // Contributor role
+      // Contributor
       contentItems.push({
         label: 'My Posts',
         icon: <FileText size={20} className="sidebar-icon" />,
@@ -154,7 +158,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
       comingNext: false
     })
 
-    if (userRole === 'super_admin' || userRole === 'communications_admin') {
+    if (isAdminRole) {
       contentItems.push({
         label: 'Review Queue',
         icon: <ClipboardList size={20} className="sidebar-icon" />,
@@ -163,19 +167,6 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         count: reviewCount,
         badgeTitle: 'Posts awaiting review'
       })
-    } else {
-      // Contributor role
-      contentItems.push({
-        label: 'Review Feedback',
-        icon: <ClipboardList size={20} className="sidebar-icon" />,
-        path: '/dashboard/review',
-        comingNext: false,
-        count: reviewCount,
-        badgeTitle: 'Drafts with requested changes'
-      })
-    }
-
-    if (userRole === 'super_admin' || userRole === 'communications_admin') {
       contentItems.push({
         label: 'Categories',
         icon: <FolderKanban size={20} className="sidebar-icon" />,
@@ -188,26 +179,40 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         path: '/dashboard/media',
         comingNext: true
       })
+    } else if (isSupervisor) {
+      contentItems.push({
+        label: 'Review Queue',
+        icon: <ClipboardList size={20} className="sidebar-icon" />,
+        path: '/dashboard/review',
+        comingNext: false,
+        count: reviewCount,
+        badgeTitle: 'Submissions awaiting your review'
+      })
+    } else {
+      // Contributor
+      contentItems.push({
+        label: 'Review Feedback',
+        icon: <ClipboardList size={20} className="sidebar-icon" />,
+        path: '/dashboard/review',
+        comingNext: false,
+        count: reviewCount,
+        badgeTitle: 'Drafts with requested changes'
+      })
     }
 
-    sections.push({
-      label: 'Content',
-      items: contentItems
-    })
+    sections.push({ label: 'Content', items: contentItems })
 
-    // 3. Administration Section
+    // ── Administration (Admin + Super Admin only) ──
     const adminItems = []
-    
     if (userRole === 'super_admin') {
       adminItems.push({
         label: 'Users',
         icon: <Users size={20} className="sidebar-icon" />,
         path: '/dashboard/users',
-        comingNext: true
+        comingNext: false  // ← now live
       })
     }
-
-    if (userRole === 'super_admin' || userRole === 'communications_admin') {
+    if (isAdminRole) {
       adminItems.push({
         label: 'Activity Log',
         icon: <History size={20} className="sidebar-icon" />,
@@ -215,15 +220,11 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         comingNext: true
       })
     }
-
     if (adminItems.length > 0) {
-      sections.push({
-        label: 'Administration',
-        items: adminItems
-      })
+      sections.push({ label: 'Administration', items: adminItems })
     }
 
-    // 4. Settings Section (Available to all)
+    // ── Settings (all roles) ──
     sections.push({
       label: 'Settings',
       items: [
@@ -247,8 +248,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
           <img src="/aasu-logo.png" alt="AASU Logo" className="sidebar-logo-img" />
           <span className="sidebar-logo-text">AASU CMS</span>
         </Link>
-        
-        {/* Toggle Collapse Button (Hidden on Mobile) */}
+
         <button
           className="sidebar-collapse-btn"
           onClick={onToggleCollapse}
@@ -257,12 +257,11 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
           {isCollapsed ? <ChevronRight size={18} /> : <ChevronLeft size={18} />}
         </button>
 
-        {/* Close Button on Mobile Drawer */}
         <button
           className="sidebar-collapse-btn mobile-only-close"
           onClick={onCloseMobile}
           aria-label="Close menu"
-          style={{ display: 'none' }} /* controlled by responsive CSS or display logic */
+          style={{ display: 'none' }}
         >
           <X size={18} />
         </button>
@@ -270,11 +269,11 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
 
       {/* Nav List */}
       <nav className="sidebar-nav-container">
-        {getNavSections().map((section) => (
+        {getNavSections().map(section => (
           <div key={section.label} className="sidebar-group">
             <span className="sidebar-group-label">{section.label}</span>
             <div className="sidebar-group-links">
-              {section.items.map((item) =>
+              {section.items.map(item =>
                 renderItem(item.label, item.icon, item.path, item.comingNext, item.count || 0, item.badgeTitle)
               )}
             </div>
@@ -282,11 +281,12 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         ))}
       </nav>
 
-      {/* Collapsed Sidebar User Badge */}
       {isCollapsed && (
         <div className="sidebar-footer">
           <div className="sidebar-collapsed-avatar">
-            {profile?.full_name ? profile.full_name.charAt(0).toUpperCase() : 'A'}
+            {profile?.full_name ? profile.full_name.charAt(0).toUpperCase()
+             : profile?.email ? profile.email.charAt(0).toUpperCase()
+             : 'A'}
           </div>
         </div>
       )}

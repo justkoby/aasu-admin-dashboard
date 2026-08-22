@@ -59,7 +59,11 @@ export default function PostEditorPage() {
   // Contributor submission confirmation modal (optional note to the reviewer)
   const [pendingSubmission, setPendingSubmission] = useState(null)
   const [submissionNote, setSubmissionNote] = useState('')
-  
+  // Supervisor assignment for contributor submission
+  const [supervisors, setSupervisors] = useState([])
+  const [selectedSupervisorId, setSelectedSupervisorId] = useState('')
+  const [isLoadingSupervisors, setIsLoadingSupervisors] = useState(false)
+
   const [isLoading, setIsLoading] = useState(isEditMode)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [saveStatus, setSaveStatus] = useState(null) // { type: 'success'|'error'|'warning', message: '' }
@@ -319,7 +323,7 @@ export default function PostEditorPage() {
   // Returns true on success, false on failure — contributor submissions use
   // the result to keep the confirmation modal open (preserving the typed note)
   // whenever the status update fails.
-  const handleSavePost = async (formValues, statusAction, contributorNote = null) => {
+  const handleSavePost = async (formValues, statusAction, contributorNote = null, assignedReviewerId = null) => {
     setIsSubmitting(true)
     setSaveStatus(null)
 
@@ -453,6 +457,10 @@ export default function PostEditorPage() {
           payload.published_at = null
           payload.reviewed_by = null
           payload.reviewed_at = null
+          // Assign reviewer (supervisor) when provided
+          if (assignedReviewerId) {
+            payload.assigned_reviewer_id = assignedReviewerId
+          }
         } else {
           // draft — default save action
           payload.status = 'draft'
@@ -518,6 +526,10 @@ export default function PostEditorPage() {
           published_at: null,
           reviewed_by: null,
           reviewed_at: null
+        }
+        // Assign reviewer (supervisor) for new contributor posts
+        if (assignedReviewerId) {
+          submissionUpdate.assigned_reviewer_id = assignedReviewerId
         }
         const { error: submitUpdateErr } = await supabase
           .from('posts')
@@ -680,8 +692,42 @@ export default function PostEditorPage() {
       await handleSavePost(formValues, 'submit')
       return
     }
+    // Load supervisors before opening modal
+    setIsLoadingSupervisors(true)
     setSubmissionNote('')
     setPendingSubmission(formValues)
+    try {
+      const { data: assignments, error: assErr } = await supabase
+        .from('supervisor_assignments')
+        .select('supervisor_id, supervisor:profiles!supervisor_assignments_supervisor_id_fkey(id, full_name, email)')
+        .eq('contributor_id', user.id)
+        .eq('is_active', true)
+
+      if (!assErr && assignments) {
+        const svs = assignments
+          .map(a => a.supervisor)
+          .filter(Boolean)
+        setSupervisors(svs)
+        // Pre-select if resubmitting a returned post that already has an assigned reviewer
+        if (svs.length === 1) {
+          setSelectedSupervisorId(svs[0].id)
+        } else if (isEditMode && originalPost?.assigned_reviewer_id) {
+          const stillActive = svs.find(s => s.id === originalPost.assigned_reviewer_id)
+          setSelectedSupervisorId(stillActive ? originalPost.assigned_reviewer_id : '')
+        } else {
+          setSelectedSupervisorId('')
+        }
+      } else {
+        setSupervisors([])
+        setSelectedSupervisorId('')
+      }
+    } catch (e) {
+      console.warn('Supervisor assignment lookup failed:', e)
+      setSupervisors([])
+      setSelectedSupervisorId('')
+    } finally {
+      setIsLoadingSupervisors(false)
+    }
   }
 
   // Modal confirmation — runs the submission flow with the optional note.
@@ -689,7 +735,7 @@ export default function PostEditorPage() {
   // open so the contributor's typed note is preserved for a retry.
   const handleConfirmSubmission = async () => {
     const formValues = pendingSubmission
-    const success = await handleSavePost(formValues, 'submit', submissionNote)
+    const success = await handleSavePost(formValues, 'submit', submissionNote, selectedSupervisorId)
     if (success) {
       setPendingSubmission(null)
     }
@@ -1144,6 +1190,10 @@ export default function PostEditorPage() {
         <SubmissionModal
           note={submissionNote}
           onNoteChange={setSubmissionNote}
+          supervisors={supervisors}
+          selectedSupervisorId={selectedSupervisorId}
+          onSupervisorChange={setSelectedSupervisorId}
+          isLoadingSupervisors={isLoadingSupervisors}
           onCancel={() => setPendingSubmission(null)}
           onConfirm={handleConfirmSubmission}
           isSubmitting={isSubmitting}

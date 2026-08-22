@@ -147,7 +147,7 @@ export default function PostsPage() {
           // Use the explicit FK alias so Supabase resolves the correct relation
           // even when multiple FK paths exist between posts and profiles.
           q = q.select(
-            '*, author:profiles!posts_author_id_fkey(full_name, email)'
+            '*, author:profiles!posts_author_id_fkey(full_name, email), assigned_reviewer:profiles!posts_assigned_reviewer_id_fkey(full_name, email)'
           )
         } else {
           // Fallback: no join — author column will show 'Unknown author'
@@ -336,7 +336,7 @@ export default function PostsPage() {
       ) : (
         // Table list
         <>
-          <PostsTable posts={posts} isContributor={profile?.role === 'contributor'} />
+          <PostsTable posts={posts} isContributor={profile?.role === 'contributor'} showAssignedReviewer={profile?.role !== 'contributor'} />
 
           {/* Pagination bar */}
           {totalPages > 1 && (

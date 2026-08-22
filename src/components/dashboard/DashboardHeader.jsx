@@ -17,7 +17,10 @@ export default function DashboardHeader({ onMenuToggle }) {
       return 'Dashboard Overview'
     }
     if (path === '/dashboard/posts') {
-      return 'All Posts'
+      return profile?.role === 'contributor' ? 'My Posts' : 'All Posts'
+    }
+    if (path === '/dashboard/team-posts') {
+      return 'Team Posts'
     }
     if (path === '/dashboard/posts/new') {
       return 'Add New Post'
@@ -30,6 +33,9 @@ export default function DashboardHeader({ onMenuToggle }) {
     }
     if (path.startsWith('/dashboard/review/')) {
       return profile?.role === 'contributor' ? 'Review Feedback' : 'Review Submission'
+    }
+    if (path === '/dashboard/users') {
+      return 'User Management'
     }
     return 'Dashboard Overview'
   }
@@ -92,10 +98,16 @@ export default function DashboardHeader({ onMenuToggle }) {
             aria-haspopup="true"
           >
             <div className="user-avatar-circle">
-              {profile?.full_name ? profile.full_name.charAt(0).toUpperCase() : 'A'}
+              {profile?.full_name
+                ? profile.full_name.charAt(0).toUpperCase()
+                : profile?.email
+                ? profile.email.charAt(0).toUpperCase()
+                : 'U'}
             </div>
             <div className="user-info-text">
-              <span className="user-display-name">{profile?.full_name || 'Administrator'}</span>
+              <span className="user-display-name">
+                {profile?.full_name || profile?.email || 'User'}
+              </span>
               <span className="user-display-role">{formatRole(profile?.role)}</span>
             </div>
             <ChevronDown size={16} className="dropdown-chevron" />
@@ -105,7 +117,7 @@ export default function DashboardHeader({ onMenuToggle }) {
             <div className="profile-dropdown-menu" role="menu">
               <div className="dropdown-user-header">
                 <span className="user-display-name" style={{ fontSize: '13px' }}>
-                  {profile?.full_name}
+                  {profile?.full_name || profile?.email || 'User'}
                 </span>
                 <span className="dropdown-user-email">{profile?.email}</span>
               </div>

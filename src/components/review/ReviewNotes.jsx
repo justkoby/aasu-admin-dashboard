@@ -149,7 +149,7 @@ export default function ReviewNotes({ postId, userId, isAdmin }) {
           <p>No review notes yet for this post.</p>
         </div>
       ) : (
-        <div className="review-notes-list editorial-conversation">
+        <div className="review-notes-list editorial-conversation" style={{ overflowX: 'hidden' }}>
           {notes.map((note) => {
             const noteType = effectiveNoteType(note)
             const isContributorNote = noteType === 'contributor_note'
@@ -159,13 +159,14 @@ export default function ReviewNotes({ postId, userId, isAdmin }) {
                   isContributorNote ? 'conversation-contributor' : 'conversation-reviewer'
                 }`}
                 key={note.id}
+                style={{ minWidth: 0 }}
               >
-                <div className="review-note-header">
-                  <span className="review-note-author">
+                <div className="review-note-header" style={{ flexWrap: 'wrap', alignItems: 'flex-start', gap: '4px 8px', minWidth: 0 }}>
+                  <span className="review-note-author" style={{ minWidth: 0, overflowWrap: 'anywhere', wordBreak: 'break-word', flex: '1 1 auto' }}>
                     {resolveNoteAuthor(note)}
                     <span className="review-note-role"> · {resolveNoteRole(note)}</span>
                   </span>
-                  <span className="review-note-date">{formatDate(note.created_at)}</span>
+                  <span className="review-note-date" style={{ flexShrink: 0 }}>{formatDate(note.created_at)}</span>
                 </div>
                 <span
                   className={`conversation-type-label ${

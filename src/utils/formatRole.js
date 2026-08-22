@@ -8,6 +8,8 @@ export const formatRole = (role) => {
       return 'Super Admin'
     case 'communications_admin':
       return 'Communications Admin'
+    case 'supervisor':
+      return 'Supervisor'
     case 'contributor':
       return 'Contributor'
     default:

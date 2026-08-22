@@ -3,7 +3,7 @@ import { Link } from 'react-router-dom'
 import StatusBadge from './StatusBadge'
 import { Edit } from 'lucide-react'
 
-export default function PostsTable({ posts, isContributor = false }) {
+export default function PostsTable({ posts, isContributor = false, showAssignedReviewer = false }) {
   const formatDate = (dateStr) => {
     if (!dateStr) return '-'
     try {
@@ -31,6 +31,18 @@ export default function PostsTable({ posts, isContributor = false }) {
     return 'Unknown author'
   }
 
+  /**
+   * Resolve the assigned reviewer name from the joined profile.
+   * Falls back gracefully if the join wasn't included.
+   */
+  const resolveAssignedReviewer = (post) => {
+    const r = post.assigned_reviewer
+    if (r?.full_name) return r.full_name
+    if (r?.email)     return r.email
+    if (!r && !post.assigned_reviewer_id) return '—'
+    return '—'
+  }
+
   const renderHeroBadge = (position) => {
     const pos = (position || 'none').toLowerCase()
     if (pos === 'primary') {
@@ -46,7 +58,6 @@ export default function PostsTable({ posts, isContributor = false }) {
         </span>
       )
     }
-    // 'none' or anything else — plain text, no badge
     return <span className="hero-none-label">None</span>
   }
 
@@ -68,13 +79,14 @@ export default function PostsTable({ posts, isContributor = false }) {
       <table className="posts-list-table" aria-label="CMS Posts List">
         <thead>
           <tr>
-            {/* Fixed/narrow columns */}
             <th scope="col" className="post-thumbnail-cell" style={{ width: '56px', minWidth: '56px' }}>Image</th>
-            {/* Title should get as much space as possible */}
             <th scope="col" style={{ minWidth: '220px' }}>Title</th>
             <th scope="col" style={{ minWidth: '100px', whiteSpace: 'nowrap' }}>Type</th>
             <th scope="col" style={{ minWidth: '130px' }}>Author</th>
             <th scope="col" style={{ minWidth: '90px', whiteSpace: 'nowrap' }}>Status</th>
+            {showAssignedReviewer && (
+              <th scope="col" style={{ minWidth: '130px', whiteSpace: 'nowrap' }}>Reviewer</th>
+            )}
             <th scope="col" style={{ minWidth: '96px', whiteSpace: 'nowrap' }}>Updated</th>
             <th scope="col" style={{ minWidth: '96px', whiteSpace: 'nowrap' }}>Published</th>
             <th scope="col" style={{ minWidth: '80px', whiteSpace: 'nowrap' }}>Hero</th>
@@ -89,9 +101,7 @@ export default function PostsTable({ posts, isContributor = false }) {
                   src={post.featured_image_url || '/aasu-logo.png'}
                   alt={post.featured_image_alt || 'Post thumbnail'}
                   className="post-thumbnail"
-                  onError={(e) => {
-                    e.target.src = '/aasu-logo.png'
-                  }}
+                  onError={(e) => { e.target.src = '/aasu-logo.png' }}
                 />
               </td>
               <td>
@@ -108,6 +118,11 @@ export default function PostsTable({ posts, isContributor = false }) {
               <td>
                 <StatusBadge status={post.status} />
               </td>
+              {showAssignedReviewer && (
+                <td style={{ color: 'var(--dash-text-secondary)', fontSize: '13px' }}>
+                  {resolveAssignedReviewer(post)}
+                </td>
+              )}
               <td>{formatDate(post.updated_at || post.created_at)}</td>
               <td>{formatDate(post.published_at)}</td>
               <td>{renderHeroBadge(post.hero_position)}</td>
@@ -140,9 +155,7 @@ export default function PostsTable({ posts, isContributor = false }) {
                 src={post.featured_image_url || '/aasu-logo.png'}
                 alt={post.featured_image_alt || 'Post thumbnail'}
                 className="post-mobile-thumb"
-                onError={(e) => {
-                  e.target.src = '/aasu-logo.png'
-                }}
+                onError={(e) => { e.target.src = '/aasu-logo.png' }}
               />
               <div className="post-mobile-meta-title">
                 <span className="post-mobile-type">{formatType(post.type)}</span>
@@ -167,6 +180,12 @@ export default function PostsTable({ posts, isContributor = false }) {
                   <StatusBadge status={post.status} />
                 </span>
               </div>
+              {showAssignedReviewer && (
+                <div className="mobile-detail-item">
+                  <span className="mobile-detail-label">Reviewer</span>
+                  <span className="mobile-detail-value">{resolveAssignedReviewer(post)}</span>
+                </div>
+              )}
               <div className="mobile-detail-item">
                 <span className="mobile-detail-label">Updated</span>
                 <span className="mobile-detail-value">

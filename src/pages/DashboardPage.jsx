@@ -3,6 +3,7 @@ import { useNavigate, Link } from 'react-router-dom'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
 import StatCard from '../components/dashboard/StatCard'
+import SupervisorDashboardPage from './SupervisorDashboardPage'
 import {
   FileText,
   CheckCircle2,
@@ -17,6 +18,12 @@ import {
 export default function DashboardPage() {
   const navigate = useNavigate()
   const { profile, loading: authLoading } = useAuth()
+
+  // Supervisors get their own scoped dashboard
+  if (!authLoading && profile?.role === 'supervisor') {
+    return <SupervisorDashboardPage />
+  }
+
   const [stats, setStats] = useState({
     total: 0,
     published: 0,

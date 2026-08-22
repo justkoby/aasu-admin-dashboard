@@ -20,6 +20,9 @@ export default function ReviewQueuePage() {
   const location = useLocation()
   const isAdmin =
     profile?.role === 'super_admin' || profile?.role === 'communications_admin'
+  const isSupervisor = profile?.role === 'supervisor'
+  // Supervisors see their own queue (posts assigned to them), similar to admins
+  const canReview = isAdmin || isSupervisor
 
   // Success flash message passed back from review decisions
   const [flashMessage, setFlashMessage] = useState(location.state?.message || null)
@@ -59,17 +62,23 @@ export default function ReviewQueuePage() {
     setIsLoading(true)
     setError(null)
     try {
-      // 1. Total awaiting review (unfiltered headline count)
-      const { count: awaitingCount, error: totalErr } = await supabase
-        .from('posts')
+      // 1. Total awaiting review (scoped for supervisor)
+      let countQ = supabase.from('posts')
         .select('id', { count: 'exact', head: true })
         .eq('status', 'in_review')
+      if (isSupervisor && profile?.id) {
+        countQ = countQ.eq('assigned_reviewer_id', profile.id)
+      }
+      const { count: awaitingCount, error: totalErr } = await countQ
       if (totalErr) throw totalErr
       setTotalAwaiting(awaitingCount || 0)
 
       // 2. Build filtered query helpers
       const applyFilters = (query) => {
         let q = query.eq('status', 'in_review')
+        if (isSupervisor && profile?.id) {
+          q = q.eq('assigned_reviewer_id', profile.id)
+        }
         if (debouncedSearch) {
           q = q.ilike('title', `%${debouncedSearch}%`)
         }
@@ -82,12 +91,12 @@ export default function ReviewQueuePage() {
       const orderColumn = 'submitted_at'
       const ascending = sortBy === 'oldest'
 
-      // 3. Fetch with the explicit author FK join; fall back without join
+      // 3. Fetch with author + assigned_reviewer FK joins; fall back without join
       const runQuery = (withJoin) => {
         let q = supabase.from('posts')
         q = q.select(
           withJoin
-            ? '*, author:profiles!posts_author_id_fkey(full_name, email)'
+            ? '*, author:profiles!posts_author_id_fkey(full_name, email), assigned_reviewer:profiles!posts_assigned_reviewer_id_fkey(full_name, email)'
             : '*'
         )
         q = applyFilters(q)
@@ -170,13 +179,13 @@ export default function ReviewQueuePage() {
 
   useEffect(() => {
     if (authLoading) return
-    if (isAdmin) {
+    if (canReview) {
       loadQueue()
     } else {
       loadFeedback()
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [authLoading, isAdmin, debouncedSearch, typeFilter, sortBy])
+  }, [authLoading, canReview, isSupervisor, debouncedSearch, typeFilter, sortBy])
 
   const formatDate = (dateStr) => {
     if (!dateStr) return '-'
@@ -240,7 +249,7 @@ export default function ReviewQueuePage() {
         </p>
         <button
           className="retry-btn"
-          onClick={() => (isAdmin ? loadQueue() : loadFeedback())}
+          onClick={() => (canReview ? loadQueue() : loadFeedback())}
         >
           <RefreshCw size={16} />
           <span>Retry Connection</span>
@@ -252,7 +261,7 @@ export default function ReviewQueuePage() {
   // ================================================================
   // CONTRIBUTOR: Review Feedback view
   // ================================================================
-  if (!isAdmin) {
+  if (!canReview) {
     return (
       <div className="dashboard-content-wrapper">
         {/* Page Header */}
