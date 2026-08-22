@@ -10,11 +10,11 @@ export default function DashboardHeader({ onMenuToggle }) {
   const [isDropdownOpen, setIsDropdownOpen] = useState(false)
   const dropdownRef = useRef(null)
 
-  // Map header title based on current route
+  // Map header title dynamically based on current route
   const getHeaderTitle = () => {
     const path = location.pathname
     if (path === '/dashboard' || path === '/dashboard/') {
-      return 'Dashboard Overview'
+      return profile?.role === 'supervisor' ? 'Supervisor Portal' : 'Dashboard Overview'
     }
     if (path === '/dashboard/posts') {
       return profile?.role === 'contributor' ? 'My Posts' : 'All Posts'
@@ -29,18 +29,29 @@ export default function DashboardHeader({ onMenuToggle }) {
       return 'Edit Post'
     }
     if (path === '/dashboard/review') {
-      return profile?.role === 'contributor' ? 'Review Feedback' : 'Review Queue'
+      return profile?.role === 'contributor' ? 'Review Feedback' : 'Editorial Review Queue'
     }
     if (path.startsWith('/dashboard/review/')) {
-      return profile?.role === 'contributor' ? 'Review Feedback' : 'Review Submission'
+      return profile?.role === 'contributor' ? 'Review Feedback' : 'Submission Review'
+    }
+    if (path === '/dashboard/categories') {
+      return 'Categories Management'
+    }
+    if (path === '/dashboard/media') {
+      return 'Media Library'
+    }
+    if (path === '/dashboard/activity') {
+      return 'Activity Log'
     }
     if (path === '/dashboard/users') {
       return 'User Management'
     }
+    if (path === '/dashboard/profile') {
+      return 'Profile & Account'
+    }
     return 'Dashboard Overview'
   }
 
-  // Format role for humans
   const formatRole = (roleString) => {
     if (!roleString) return 'User'
     return roleString
@@ -49,7 +60,6 @@ export default function DashboardHeader({ onMenuToggle }) {
       .join(' ')
   }
 
-  // Close dropdown on click outside
   useEffect(() => {
     const handleClickOutside = (event) => {
       if (dropdownRef.current && !dropdownRef.current.contains(event.target)) {
@@ -71,13 +81,12 @@ export default function DashboardHeader({ onMenuToggle }) {
 
   const handleProfileClick = () => {
     setIsDropdownOpen(false)
-    alert('Profile module is coming next.')
+    navigate('/dashboard/profile')
   }
 
   return (
     <header className="dashboard-header-bar">
       <div className="header-left-group">
-        {/* Mobile Hamburger menu */}
         <button
           className="mobile-menu-toggle"
           onClick={onMenuToggle}
@@ -89,7 +98,6 @@ export default function DashboardHeader({ onMenuToggle }) {
       </div>
 
       <div className="header-right-group">
-        {/* Profile Dropdown */}
         <div className="profile-dropdown-container" ref={dropdownRef}>
           <button
             className="profile-dropdown-trigger"
@@ -134,10 +142,7 @@ export default function DashboardHeader({ onMenuToggle }) {
               <button
                 className="dropdown-menu-item"
                 role="menuitem"
-                onClick={() => {
-                  setIsDropdownOpen(false)
-                  alert('Settings module is coming next.')
-                }}
+                onClick={handleProfileClick}
               >
                 <Settings size={16} />
                 <span>Account Settings</span>

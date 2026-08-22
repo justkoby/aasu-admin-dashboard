@@ -13,6 +13,8 @@ import UsersPage from './pages/UsersPage'
 import TeamPostsPage from './pages/TeamPostsPage'
 import CategoriesPage from './pages/CategoriesPage'
 import MediaLibraryPage from './pages/MediaLibraryPage'
+import ActivityLogPage from './pages/ActivityLogPage'
+import ProfilePage from './pages/ProfilePage'
 
 export default function App() {
   return (
@@ -42,6 +44,9 @@ export default function App() {
             <Route path="posts/new" element={<PostEditorPage />} />
             <Route path="posts/:id/edit" element={<PostEditorPage />} />
 
+            {/* Profile & Account Settings (all authenticated roles) */}
+            <Route path="profile" element={<ProfilePage />} />
+
             {/* Media Library (all authenticated roles with role-scoped assets) */}
             <Route path="media" element={<MediaLibraryPage />} />
 
@@ -58,6 +63,16 @@ export default function App() {
             {/* Editorial Review Workflow (admin + supervisor = canReview; contributor sees feedback) */}
             <Route path="review" element={<ReviewQueuePage />} />
             <Route path="review/:id" element={<ReviewPostPage />} />
+
+            {/* Activity Log (Super Admin, Comms Admin & Supervisor) */}
+            <Route
+              path="activity"
+              element={
+                <RoleRoute allowedRoles={['super_admin', 'communications_admin', 'supervisor']}>
+                  <ActivityLogPage />
+                </RoleRoute>
+              }
+            />
 
             {/* Super Admin & Communications Admin — Categories Management */}
             <Route

@@ -390,3 +390,55 @@
   height: 100%;
   object-fit: cover;
 }
+
+/* Delete Confirmation Modal Overlay */
+.delete-confirm-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: rgba(15, 23, 42, 0.65);
+  backdrop-filter: blur(4px);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1200;
+  padding: 16px;
+  animation: fadeIn 0.15s ease-out;
+}
+
+.delete-confirm-modal {
+  background-color: #ffffff;
+  border-radius: 12px;
+  width: 100%;
+  max-width: 440px;
+  padding: 24px;
+  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  animation: modalSlideUp 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+.delete-confirm-title {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--dash-navy);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.delete-confirm-message {
+  font-size: 14px;
+  color: var(--dash-navy);
+  line-height: 1.5;
+}
+
+.delete-confirm-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+  margin-top: 8px;
+}

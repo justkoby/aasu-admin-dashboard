@@ -7,6 +7,7 @@ import { supabase } from '../lib/supabaseClient'
 import { postSchema } from '../utils/validationSchemas'
 import { createSlug } from '../utils/createSlug'
 import FeaturedImageUploader from '../components/posts/FeaturedImageUploader'
+import PostGalleryManager from '../components/posts/PostGalleryManager'
 import RichTextEditor from '../components/posts/RichTextEditor'
 import SubmissionModal from '../components/posts/SubmissionModal'
 import { formatRole } from '../utils/formatRole'
@@ -76,6 +77,7 @@ export default function PostEditorPage() {
   const [isLoading, setIsLoading] = useState(isEditMode)
   const [isSubmitting, setIsSubmitting] = useState(false)
   const [saveStatus, setSaveStatus] = useState(null)
+  const [galleryImages, setGalleryImages] = useState([])
 
   // React Hook Form initialization
   const {
@@ -101,7 +103,10 @@ export default function PostEditorPage() {
       hero_position: 'none',
       featured_until: '',
       seo_title: '',
-      seo_description: ''
+      seo_description: '',
+      reference_number: '',
+      external_url: '',
+      redirect_url: ''
     }
   })
 
@@ -232,8 +237,23 @@ export default function PostEditorPage() {
                 ? postData.featured_until.split('T')[0]
                 : '',
               seo_title: postData.seo_title || '',
-              seo_description: postData.seo_description || ''
+              seo_description: postData.seo_description || '',
+              reference_number: postData.reference_number || '',
+              external_url: postData.external_url || '',
+              redirect_url: postData.redirect_url || ''
             })
+
+            // Fetch attached Gallery Images
+            try {
+              const { data: gData } = await supabase
+                .from('post_gallery_images')
+                .select('*')
+                .eq('post_id', id)
+                .order('sort_order', { ascending: true })
+              if (isMounted && gData) setGalleryImages(gData)
+            } catch (gErr) {
+              console.warn('Gallery images fetch warning:', gErr)
+            }
 
             setPostLoaded(true)
 
@@ -377,7 +397,10 @@ export default function PostEditorPage() {
         region: formValues.region || null,
         theme: formValues.theme || null,
         seo_title: formValues.seo_title || null,
-        seo_description: formValues.seo_description || null
+        seo_description: formValues.seo_description || null,
+        reference_number: formValues.reference_number || null,
+        external_url: formValues.external_url || null,
+        redirect_url: formValues.redirect_url || null
       }
 
       let payload
@@ -600,6 +623,26 @@ export default function PostEditorPage() {
           category_ids: selectedCategoryIds
         })
         categoryAssignmentSuccess = false
+      }
+
+      // 4b. Save Gallery Images safely
+      try {
+        await supabase.from('post_gallery_images').delete().eq('post_id', savedPost.id)
+        if (galleryImages.length > 0) {
+          const galleryPayload = galleryImages.map((img, idx) => ({
+            post_id: savedPost.id,
+            media_asset_id: img.media_asset_id || null,
+            image_url: img.image_url,
+            storage_path: img.storage_path || null,
+            alt_text: img.alt_text || null,
+            caption: img.caption || null,
+            sort_order: idx
+          }))
+          const { error: gErr } = await supabase.from('post_gallery_images').insert(galleryPayload)
+          if (gErr) logSaveError('post_gallery_images.insert', gErr, { post_id: savedPost.id })
+        }
+      } catch (gErr) {
+        console.warn('Post gallery images save warning:', gErr)
       }
 
       // 5. Report save state & Navigation
@@ -975,6 +1018,14 @@ export default function PostEditorPage() {
                 )}
               </div>
             </div>
+
+            {/* Card: Additional Gallery Images */}
+            <div className="editor-card">
+              <PostGalleryManager
+                galleryImages={galleryImages}
+                onChangeGalleryImages={setGalleryImages}
+              />
+            </div>
           </div>
 
           {/* ---------------- Right: Metadata & Settings Column ---------------- */}
@@ -1021,8 +1072,64 @@ export default function PostEditorPage() {
                 <select id="type" {...register('type')} disabled={isSubmitting}>
                   <option value="news">News Report</option>
                   <option value="blog">Blog Insight</option>
+                  <option value="event">Event</option>
+                  <option value="press_release">Press Release</option>
+                  <option value="readout">Readout / Communiqué</option>
                 </select>
               </div>
+
+              {/* Reference Number (Press Release / Readout / Event) */}
+              {['press_release', 'readout', 'event'].includes((watch('type') || '').toLowerCase()) && (
+                <div className="editor-form-group">
+                  <label htmlFor="reference_number">Official Reference Number</label>
+                  <input
+                    id="reference_number"
+                    type="text"
+                    {...register('reference_number')}
+                    placeholder="e.g. AASU/PR/2026/04"
+                    disabled={isSubmitting}
+                  />
+                  <p className="uploader-hint" style={{ marginTop: '2px' }}>
+                    Official document reference code.
+                  </p>
+                </div>
+              )}
+
+              {/* External URL */}
+              <div className="editor-form-group">
+                <label htmlFor="external_url">
+                  {(watch('type') || '').toLowerCase() === 'event'
+                    ? 'Event Registration / Platform Link'
+                    : 'External Resource / Article Link'}
+                </label>
+                <input
+                  id="external_url"
+                  type="url"
+                  {...register('external_url')}
+                  placeholder="https://..."
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              {/* Redirect URL (Admin-Only Advanced Routing Override) */}
+              {canManageHero && (
+                <div className="editor-form-group">
+                  <label htmlFor="redirect_url" style={{ color: 'var(--posts-red)', fontWeight: 700 }}>
+                    Redirect URL (Advanced Override)
+                  </label>
+                  <input
+                    id="redirect_url"
+                    type="text"
+                    {...register('redirect_url')}
+                    placeholder="/events/special-page or https://..."
+                    disabled={isSubmitting}
+                  />
+                  <p className="uploader-hint" style={{ marginTop: '2px', color: '#cb3631' }}>
+                    <AlertTriangle size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                    Warning: Entering a value will bypass normal article page rendering and redirect site visitors.
+                  </p>
+                </div>
+              )}
 
               {/* Regional Focus */}
               <div className="editor-form-group">

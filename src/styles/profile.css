@@ -1,0 +1,149 @@
+/* ── Profile & Account Settings Styling ───────────────────────────────────────── */
+
+.profile-page-grid {
+  display: grid;
+  grid-template-columns: 1fr 1.5fr;
+  gap: 24px;
+  align-items: start;
+}
+
+@media (max-width: 900px) {
+  .profile-page-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+.profile-card {
+  background-color: var(--dash-card-bg);
+  border: 1px solid var(--dash-border);
+  border-radius: 12px;
+  padding: 24px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.03);
+  display: flex;
+  flex-direction: column;
+  gap: 20px;
+}
+
+.profile-card-header {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  padding-bottom: 20px;
+  border-bottom: 1px solid var(--dash-border);
+}
+
+.profile-avatar-large {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  background: linear-gradient(135deg, var(--dash-navy) 0%, #334155 100%);
+  color: #ffffff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 28px;
+  font-weight: 800;
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+  border: 3px solid var(--dash-card-bg);
+}
+
+.profile-avatar-img {
+  width: 72px;
+  height: 72px;
+  border-radius: 50%;
+  object-fit: cover;
+  border: 3px solid var(--dash-card-bg);
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.12);
+}
+
+.profile-header-meta h3 {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--dash-navy);
+  margin-bottom: 2px;
+}
+
+.profile-header-meta p {
+  font-size: 13px;
+  color: var(--dash-text-secondary);
+}
+
+/* Metadata List */
+.profile-meta-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.profile-meta-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+}
+
+.profile-meta-label {
+  font-weight: 600;
+  color: var(--dash-text-secondary);
+}
+
+.profile-meta-value {
+  font-weight: 700;
+  color: var(--dash-navy);
+}
+
+/* Password Strength Indicator */
+.password-strength-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.password-requirements-list {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 6px 12px;
+  margin-top: 6px;
+}
+
+.password-req-item {
+  font-size: 12px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--dash-text-secondary);
+}
+
+.password-req-item.valid {
+  color: #059669;
+  font-weight: 600;
+}
+
+/* Input with Password Toggle Eye */
+.input-with-icon-wrapper {
+  position: relative;
+  display: flex;
+  align-items: center;
+}
+
+.input-with-icon-wrapper input {
+  width: 100%;
+  padding-right: 40px;
+}
+
+.password-toggle-btn {
+  position: absolute;
+  right: 12px;
+  background: transparent;
+  border: none;
+  color: var(--dash-text-secondary);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.password-toggle-btn:hover {
+  color: var(--dash-navy);
+}

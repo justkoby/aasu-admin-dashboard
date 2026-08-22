@@ -16,7 +16,8 @@ import {
   Grid,
   List as ListIcon,
   ExternalLink,
-  User
+  User,
+  AlertCircle
 } from 'lucide-react'
 import '../styles/dashboard.css'
 import '../styles/media.css'
@@ -30,7 +31,7 @@ const logSupabaseError = (operation, error, extra = {}) => {
     details: error.details ?? null,
     hint: error.hint ?? null,
     extra,
-    errorObj: error
+    rawError: error
   })
 }
 
@@ -58,10 +59,10 @@ export default function MediaLibraryPage() {
   const [error, setError] = useState(null)
 
   // Filters & Display
-  const [viewMode, setViewMode] = useState('grid') // 'grid' | 'list'
+  const [viewMode, setViewMode] = useState('grid')
   const [searchTerm, setSearchTerm] = useState('')
   const [typeFilter, setTypeFilter] = useState('all')
-  const [sortBy, setSortBy] = useState('newest') // 'newest' | 'oldest' | 'name' | 'size'
+  const [sortBy, setSortBy] = useState('newest')
 
   // Upload State
   const [isUploading, setIsUploading] = useState(false)
@@ -70,6 +71,10 @@ export default function MediaLibraryPage() {
 
   // Modals & Notifications
   const [selectedAsset, setSelectedAsset] = useState(null) // Details modal
+  const [assetToDelete, setAssetToDelete] = useState(null) // Confirmation modal
+  const [isDeletingAsset, setIsDeletingAsset] = useState(false)
+  const [deleteModalError, setDeleteModalError] = useState(null)
+
   const [notification, setNotification] = useState(null)
   const [isSyncing, setIsSyncing] = useState(false)
 
@@ -82,7 +87,6 @@ export default function MediaLibraryPage() {
     setError(null)
 
     try {
-      // Query 1: Fetch Profiles for uploader lookup
       const { data: profData } = await supabase
         .from('profiles')
         .select('id, full_name, email')
@@ -93,13 +97,11 @@ export default function MediaLibraryPage() {
       }
       setProfilesMap(pMap)
 
-      // Query 2: Fetch Media Assets
       let query = supabase
         .from('media_assets')
         .select('*')
         .order('created_at', { ascending: false })
 
-      // Role-scoped filtering fallback for non-admins
       if (!isAdminRole && !isSupervisor && user?.id) {
         query = query.eq('uploaded_by', user.id)
       }
@@ -108,7 +110,6 @@ export default function MediaLibraryPage() {
 
       if (mediaErr) {
         logSupabaseError('media_assets.select', mediaErr)
-        // If media_assets table is not created yet, show friendly warning
         if (mediaErr.code === '42P01') {
           setError({
             message: 'The media_assets database table has not been initialized yet. Please run migration 002_create_media_assets.sql.'
@@ -188,7 +189,6 @@ export default function MediaLibraryPage() {
         .from('content-images')
         .getPublicUrl(filePath)
 
-      // Insert metadata into media_assets
       const { error: metaErr } = await supabase
         .from('media_assets')
         .insert({
@@ -205,7 +205,6 @@ export default function MediaLibraryPage() {
 
       if (metaErr) {
         logSupabaseError('media_assets.insert', metaErr, { filePath })
-        // Rollback Storage upload to prevent orphaned file
         await supabase.storage.from('content-images').remove([filePath])
         throw new Error(`Failed to save image metadata: ${metaErr.message}`)
       }
@@ -224,65 +223,137 @@ export default function MediaLibraryPage() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Safe Deletion Handler
+  // Delete Flow: Initiate & Confirm
   // ─────────────────────────────────────────────────────────────────────────
 
-  const handleDeleteAsset = async (asset) => {
-    setNotification(null)
+  const handleInitiateDelete = (asset) => {
+    console.log('[AASU CMS Media] Delete Asset clicked', {
+      assetId: asset.id,
+      storage_path: asset.storage_path,
+      public_url: asset.public_url,
+      authenticatedUserId: user?.id,
+      uploaderId: asset.uploaded_by
+    })
+
+    setDeleteModalError(null)
+    setAssetToDelete(asset)
+  }
+
+  const handleConfirmDelete = async () => {
+    if (!assetToDelete) return
+    setIsDeletingAsset(true)
+    setDeleteModalError(null)
 
     try {
-      // 1. Check if asset URL is referenced in posts.featured_image_url
+      // 1. Posts dependency check
+      console.log('[AASU CMS Media] Running posts usage check', {
+        assetId: assetToDelete.id,
+        public_url: assetToDelete.public_url,
+        storage_path: assetToDelete.storage_path
+      })
+
       const { data: postRefs, error: postErr } = await supabase
         .from('posts')
         .select('id, title')
-        .or(`featured_image_url.eq.${asset.public_url},featured_image_url.ilike.%${asset.storage_path}%`)
+        .or(`featured_image_url.eq.${assetToDelete.public_url},featured_image_url.ilike.%${assetToDelete.storage_path}%`)
+
+      console.log('[AASU CMS Media] Posts usage check result', {
+        data: postRefs,
+        error: postErr ? {
+          code: postErr.code,
+          message: postErr.message,
+          details: postErr.details,
+          hint: postErr.hint,
+          raw: postErr
+        } : null
+      })
 
       if (postErr) {
-        logSaveError('posts.select (featured_image_url check)', postErr)
+        logSupabaseError('posts usage check', postErr)
       }
 
       if (postRefs && postRefs.length > 0) {
-        setNotification({
-          type: 'error',
-          message: `Cannot delete asset "${asset.original_filename}" because it is currently used as the featured image for ${postRefs.length} post(s).`
-        })
+        setDeleteModalError(
+          `Cannot delete asset because it is currently used as the featured image for ${postRefs.length} post(s): ${postRefs.map(p => `"${p.title}"`).join(', ')}.`
+        )
+        setIsDeletingAsset(false)
         return
       }
 
-      const confirmed = window.confirm(
-        `Permanently delete asset "${asset.original_filename}"? This action cannot be undone.`
-      )
-      if (!confirmed) return
-
-      // 2. Delete Storage object
-      if (asset.storage_path) {
-        const { error: storageErr } = await supabase.storage
-          .from('content-images')
-          .remove([asset.storage_path])
-
-        if (storageErr) {
-          logSupabaseError('supabase.storage.remove', storageErr, { path: asset.storage_path })
-        }
+      // 2. Storage object deletion
+      let cleanStoragePath = assetToDelete.storage_path || ''
+      if (cleanStoragePath.includes('/content-images/')) {
+        cleanStoragePath = cleanStoragePath.split('/content-images/')[1]
       }
 
-      // 3. Delete media_assets database row
-      const { error: delErr } = await supabase
+      console.log('[AASU CMS Media] Executing storage deletion', { cleanStoragePath })
+
+      const { data: storageData, error: storageErr } = await supabase.storage
+        .from('content-images')
+        .remove([cleanStoragePath])
+
+      console.log('[AASU CMS Media] Storage objects deletion result', {
+        data: storageData,
+        error: storageErr ? {
+          code: storageErr.code,
+          message: storageErr.message,
+          details: storageErr.details,
+          hint: storageErr.hint,
+          raw: storageErr
+        } : null
+      })
+
+      if (storageErr) {
+        logSupabaseError('storage.remove', storageErr)
+        setDeleteModalError(`Storage object deletion failed: ${storageErr.message || 'Unknown error'}`)
+        setIsDeletingAsset(false)
+        return
+      }
+
+      // 3. Metadata row deletion
+      console.log('[AASU CMS Media] Executing media_assets row deletion', { id: assetToDelete.id })
+
+      const { data: metaDelData, error: metaDelErr } = await supabase
         .from('media_assets')
         .delete()
-        .eq('id', asset.id)
+        .eq('id', assetToDelete.id)
+        .select('id')
+        .single()
 
-      if (delErr) {
-        logSupabaseError('media_assets.delete', delErr, { id: asset.id })
-        setNotification({ type: 'error', message: `Failed to delete asset metadata: ${delErr.message}` })
+      console.log('[AASU CMS Media] media_assets deletion result', {
+        data: metaDelData,
+        error: metaDelErr ? {
+          code: metaDelErr.code,
+          message: metaDelErr.message,
+          details: metaDelErr.details,
+          hint: metaDelErr.hint,
+          raw: metaDelErr
+        } : null
+      })
+
+      if (metaDelErr) {
+        logSupabaseError('media_assets.delete', metaDelErr)
+        setDeleteModalError(`Database metadata deletion failed (RLS policy may have blocked this operation): ${metaDelErr.message}`)
+        setIsDeletingAsset(false)
         return
       }
 
-      setNotification({ type: 'success', message: `Asset "${asset.original_filename}" deleted successfully.` })
-      if (selectedAsset?.id === asset.id) setSelectedAsset(null)
+      if (!metaDelData || !metaDelData.id) {
+        setDeleteModalError('Database metadata deletion returned no row. RLS policy may have blocked this delete operation.')
+        setIsDeletingAsset(false)
+        return
+      }
+
+      // Success sequence
+      setAssetToDelete(null)
+      setSelectedAsset(null)
+      setIsDeletingAsset(false)
+      setNotification({ type: 'success', message: 'Asset deleted successfully.' })
       await loadData()
     } catch (err) {
-      logSupabaseError('handleDeleteAsset (exception)', err)
-      setNotification({ type: 'error', message: 'Failed to delete asset.' })
+      console.error('[AASU CMS Media] Unexpected error during asset deletion:', err)
+      setDeleteModalError(`Deletion failed: ${err.message || 'An unexpected error occurred.'}`)
+      setIsDeletingAsset(false)
     }
   }
 
@@ -323,7 +394,7 @@ export default function MediaLibraryPage() {
   }
 
   // ─────────────────────────────────────────────────────────────────────────
-  // Admin Sync Storage Action (Backward compatibility)
+  // Admin Sync Storage Action
   // ─────────────────────────────────────────────────────────────────────────
 
   const handleSyncStorage = async () => {
@@ -332,14 +403,12 @@ export default function MediaLibraryPage() {
     setNotification(null)
 
     try {
-      // 1. List objects in 'content-images' bucket
       const { data: storageFiles, error: listErr } = await supabase.storage
         .from('content-images')
         .list('', { limit: 1000 })
 
       if (listErr) throw listErr
 
-      // 2. Fetch existing registered storage_paths
       const { data: existingRecords } = await supabase
         .from('media_assets')
         .select('storage_path')
@@ -385,15 +454,10 @@ export default function MediaLibraryPage() {
     }
   }
 
-  // Copy URL Helper
   const copyToClipboard = (text) => {
     navigator.clipboard.writeText(text)
     setNotification({ type: 'success', message: 'Public URL copied to clipboard!' })
   }
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Filtered & Sorted Assets
-  // ─────────────────────────────────────────────────────────────────────────
 
   const filteredAssets = useMemo(() => {
     return assets.filter(asset => {
@@ -418,14 +482,9 @@ export default function MediaLibraryPage() {
       if (sortBy === 'size') {
         return (b.file_size || 0) - (a.file_size || 0)
       }
-      // 'newest' default
       return new Date(b.created_at) - new Date(a.created_at)
     })
   }, [assets, searchTerm, typeFilter, sortBy])
-
-  // ─────────────────────────────────────────────────────────────────────────
-  // Render
-  // ─────────────────────────────────────────────────────────────────────────
 
   if (error) {
     return (
@@ -443,7 +502,6 @@ export default function MediaLibraryPage() {
 
   return (
     <div className="dashboard-content-wrapper">
-      {/* Hidden File Input */}
       <input
         type="file"
         ref={fileInputRef}
@@ -453,7 +511,6 @@ export default function MediaLibraryPage() {
         disabled={isUploading}
       />
 
-      {/* Page Header */}
       <div className="media-page-header">
         <div>
           <h2>Media Library</h2>
@@ -483,15 +540,13 @@ export default function MediaLibraryPage() {
         </div>
       </div>
 
-      {/* Top Notification Banner */}
-      {notification && !selectedAsset && (
+      {notification && !selectedAsset && !assetToDelete && (
         <div className={`users-notification ${notification.type}`} style={{ marginBottom: '20px' }}>
           {notification.type === 'success' ? <CheckCircle2 size={16} /> : <AlertTriangle size={16} />}
           <span>{notification.message}</span>
         </div>
       )}
 
-      {/* Upload Dropzone */}
       <div
         className="media-upload-dropzone"
         onClick={() => fileInputRef.current?.click()}
@@ -510,7 +565,6 @@ export default function MediaLibraryPage() {
         )}
       </div>
 
-      {/* Filter & View Toolbar */}
       <div className="media-toolbar">
         <div className="media-toolbar-left">
           <input
@@ -562,14 +616,12 @@ export default function MediaLibraryPage() {
         </div>
       </div>
 
-      {/* Summary strip */}
       {!isLoading && (
         <p className="categories-summary-strip" style={{ marginBottom: '16px' }}>
           Showing <strong>{filteredAssets.length}</strong> of <strong>{assets.length}</strong> assets
         </p>
       )}
 
-      {/* Main Grid / List View Content */}
       {isLoading ? (
         <div className="media-grid-container">
           {[1, 2, 3, 4, 5, 6].map(i => (
@@ -592,11 +644,8 @@ export default function MediaLibraryPage() {
           </div>
         </div>
       ) : viewMode === 'grid' ? (
-        /* Grid View */
         <div className="media-grid-container">
           {filteredAssets.map(asset => {
-            const uploader = profilesMap.get(asset.uploaded_by)
-            const uploaderName = uploader?.full_name || uploader?.email || 'System'
             return (
               <div className="media-asset-card" key={asset.id}>
                 <div
@@ -640,7 +689,7 @@ export default function MediaLibraryPage() {
                   <button
                     type="button"
                     className="asset-action-btn delete"
-                    onClick={() => handleDeleteAsset(asset)}
+                    onClick={() => handleInitiateDelete(asset)}
                     title="Delete asset"
                   >
                     <Trash2 size={12} />
@@ -651,7 +700,6 @@ export default function MediaLibraryPage() {
           })}
         </div>
       ) : (
-        /* List View */
         <div className="categories-card-container">
           <table className="categories-list-table">
             <thead>
@@ -714,7 +762,7 @@ export default function MediaLibraryPage() {
                         <button
                           type="button"
                           className="asset-action-btn delete"
-                          onClick={() => handleDeleteAsset(asset)}
+                          onClick={() => handleInitiateDelete(asset)}
                         >
                           <Trash2 size={12} />
                         </button>
@@ -735,9 +783,63 @@ export default function MediaLibraryPage() {
           uploader={profilesMap.get(selectedAsset.uploaded_by)}
           onClose={() => setSelectedAsset(null)}
           onUpdate={handleUpdateDetails}
-          onDelete={() => handleDeleteAsset(selectedAsset)}
+          onDelete={() => handleInitiateDelete(selectedAsset)}
           onCopyUrl={copyToClipboard}
         />
+      )}
+
+      {/* Visible Delete Confirmation Modal */}
+      {assetToDelete && (
+        <div className="delete-confirm-overlay" role="dialog" aria-modal="true" aria-labelledby="delete-confirm-title">
+          <div className="delete-confirm-modal">
+            <div className="delete-confirm-title">
+              <AlertTriangle size={20} style={{ color: '#DC2626' }} />
+              <span id="delete-confirm-title">Confirm Asset Deletion</span>
+            </div>
+
+            <p className="delete-confirm-message">
+              Permanently delete <strong>{assetToDelete.original_filename}</strong>? This cannot be undone.
+            </p>
+
+            {deleteModalError && (
+              <div className="validation-error-text" style={{ display: 'flex', alignItems: 'flex-start', gap: '6px', marginTop: '4px' }}>
+                <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+                <span>{deleteModalError}</span>
+              </div>
+            )}
+
+            <div className="delete-confirm-actions">
+              <button
+                type="button"
+                className="category-modal-cancel-btn"
+                onClick={() => setAssetToDelete(null)}
+                disabled={isDeletingAsset}
+              >
+                Cancel
+              </button>
+
+              <button
+                type="button"
+                className="category-modal-save-btn"
+                style={{ backgroundColor: '#DC2626', color: '#ffffff' }}
+                onClick={handleConfirmDelete}
+                disabled={isDeletingAsset}
+              >
+                {isDeletingAsset ? (
+                  <>
+                    <RefreshCw size={14} className="spin" />
+                    <span>Deleting asset…</span>
+                  </>
+                ) : (
+                  <>
+                    <Trash2 size={14} />
+                    <span>Confirm Delete</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   )
@@ -755,14 +857,13 @@ function AssetDetailsModal({ asset, uploader, onClose, onUpdate, onDelete, onCop
   const handleSave = async (e) => {
     e.preventDefault()
     setIsSaving(true)
-    const ok = await onUpdate(asset.id, altText, caption)
+    await onUpdate(asset.id, altText, caption)
     setIsSaving(false)
   }
 
   return (
     <div className="modal-overlay" role="dialog" aria-modal="true" aria-labelledby="asset-details-title">
       <div className="media-details-modal">
-        {/* Header */}
         <div className="category-modal-header">
           <h2 id="asset-details-title">Asset Details</h2>
           <button className="modal-close-btn" onClick={onClose} aria-label="Close modal">
@@ -770,9 +871,7 @@ function AssetDetailsModal({ asset, uploader, onClose, onUpdate, onDelete, onCop
           </button>
         </div>
 
-        {/* Body */}
         <div className="media-details-body">
-          {/* Left Preview */}
           <div className="media-details-preview-panel">
             <img
               src={asset.public_url}
@@ -797,7 +896,6 @@ function AssetDetailsModal({ asset, uploader, onClose, onUpdate, onDelete, onCop
             </div>
           </div>
 
-          {/* Right Details & Edit Form */}
           <form onSubmit={handleSave} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
             <div className="modal-form-group">
               <label>Original Filename</label>

@@ -212,12 +212,12 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
         comingNext: false  // ← now live
       })
     }
-    if (isAdminRole) {
+    if (isAdminRole || isSupervisor) {
       adminItems.push({
         label: 'Activity Log',
         icon: <History size={20} className="sidebar-icon" />,
         path: '/dashboard/activity',
-        comingNext: true
+        comingNext: false
       })
     }
     if (adminItems.length > 0) {
@@ -232,7 +232,7 @@ export default function Sidebar({ isCollapsed, onToggleCollapse, isMobileOpen, o
           label: 'Profile',
           icon: <User size={20} className="sidebar-icon" />,
           path: '/dashboard/profile',
-          comingNext: true
+          comingNext: false
         }
       ]
     })
