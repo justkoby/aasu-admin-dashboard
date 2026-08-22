@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react'
+import React, { useEffect, useRef } from 'react'
 import { useEditor, EditorContent } from '@tiptap/react'
 import StarterKit from '@tiptap/starter-kit'
 import Link from '@tiptap/extension-link'
@@ -17,6 +17,9 @@ import {
 } from 'lucide-react'
 
 export default function RichTextEditor({ value, onChange }) {
+  // Ref to track the last externally set or user-typed value to prevent reset during typing
+  const lastExternalValueRef = useRef(value || '')
+
   const editor = useEditor({
     extensions: [
       StarterKit,
@@ -30,14 +33,23 @@ export default function RichTextEditor({ value, onChange }) {
     ],
     content: value || '',
     onUpdate: ({ editor }) => {
-      onChange(editor.getHTML())
+      const html = editor.getHTML()
+      lastExternalValueRef.current = html
+      onChange(html)
     }
   })
 
-  // Sync editor content if the value changes from the outside (e.g. after database load)
+  // Synchronize editor content when external value changes (e.g. after async database fetch)
   useEffect(() => {
-    if (editor && value !== undefined && value !== editor.getHTML()) {
-      editor.commands.setContent(value)
+    if (!editor) return
+    const incoming = value || ''
+
+    if (incoming !== lastExternalValueRef.current) {
+      const currentHtml = editor.getHTML()
+      if (incoming !== currentHtml) {
+        editor.commands.setContent(incoming, false)
+      }
+      lastExternalValueRef.current = incoming
     }
   }, [value, editor])
 
@@ -53,18 +65,15 @@ export default function RichTextEditor({ value, onChange }) {
     const previousUrl = editor.getAttributes('link').href
     const url = window.prompt('Enter URL:', previousUrl)
 
-    // Cancelled
     if (url === null) {
       return
     }
 
-    // Empty URL -> remove link
     if (url === '') {
       editor.chain().focus().extendMarkRange('link').unsetLink().run()
       return
     }
 
-    // Set link
     editor.chain().focus().extendMarkRange('link').setLink({ href: url }).run()
   }
 

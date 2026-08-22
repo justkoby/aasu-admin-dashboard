@@ -21,8 +21,12 @@ export default function ReviewPostPage() {
   const { id } = useParams()
   const navigate = useNavigate()
   const { user, profile, loading: authLoading } = useAuth()
-  const isAdmin =
-    profile?.role === 'super_admin' || profile?.role === 'communications_admin'
+
+  // 1. Explicit Role Booleans
+  const isSuperAdmin = profile?.role === 'super_admin'
+  const isCommunicationsAdmin = profile?.role === 'communications_admin'
+  const isSupervisor = profile?.role === 'supervisor'
+  const isContributor = profile?.role === 'contributor'
 
   const [post, setPost] = useState(null)
   const [categoryNames, setCategoryNames] = useState([])
@@ -39,10 +43,12 @@ export default function ReviewPostPage() {
       setError(null)
       setPermissionDenied(false)
       try {
-        // 1. Fetch post with the explicit author FK join (fallback without join)
+        // Fetch post with author and assigned_reviewer profile joins
         let result = await supabase
           .from('posts')
-          .select('*, author:profiles!posts_author_id_fkey(full_name, email)')
+          .select(
+            '*, author:profiles!posts_author_id_fkey(full_name, email), assigned_reviewer:profiles!posts_assigned_reviewer_id_fkey(full_name, email)'
+          )
           .eq('id', id)
           .single()
 
@@ -58,10 +64,30 @@ export default function ReviewPostPage() {
 
         const loadedPost = result.data
 
-        // 2. Contributors may only review content attached to their own posts
-        if (!isAdmin && loadedPost.author_id !== user.id) {
-          setPermissionDenied(true)
-          setIsLoading(false)
+        // 2. Authorization Check
+        const canReview =
+          isSuperAdmin ||
+          isCommunicationsAdmin ||
+          (isSupervisor && loadedPost.assigned_reviewer_id === user?.id)
+
+        const isOwnPostFeedback = isContributor && loadedPost.author_id === user?.id
+
+        console.log('[Review Access Check]', {
+          profileRole: profile?.role,
+          authenticatedUserId: user?.id,
+          assignedReviewerId: loadedPost?.assigned_reviewer_id,
+          authorId: loadedPost?.author_id,
+          postId: id,
+          canReview,
+          isOwnPostFeedback
+        })
+
+        // Deny access if user cannot review AND is not a contributor viewing their own post feedback
+        if (!canReview && !isOwnPostFeedback) {
+          if (isMounted) {
+            setPermissionDenied(true)
+            setIsLoading(false)
+          }
           return
         }
 
@@ -89,7 +115,6 @@ export default function ReviewPostPage() {
             }
           }
         } catch (catErr) {
-          // Category metadata is decorative in the preview — never block on it
           console.warn('Could not load categories for review preview:', catErr)
         }
       } catch (err) {
@@ -108,10 +133,9 @@ export default function ReviewPostPage() {
     return () => {
       isMounted = false
     }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [id, authLoading])
+  }, [id, authLoading, profile, user])
 
-  // Sanitize the rich article content exactly once per loaded post
+  // Sanitize article content
   const safeContent = useMemo(() => sanitizeHtml(post?.content || ''), [post?.content])
 
   const formatDate = (dateStr) => {
@@ -145,24 +169,30 @@ export default function ReviewPostPage() {
   }
 
   const resolveAuthor = () => {
+    if (!post) return 'Unknown author'
     if (post.author?.full_name) return post.author.full_name
     if (post.author?.email) return post.author.email
     return 'Unknown author'
   }
 
   const handleRetry = () => {
-    // Trigger a reload by clearing and re-running the effect dependencies
     setError(null)
     setIsLoading(true)
     const reload = async () => {
       try {
         const { data, error: retryErr } = await supabase
           .from('posts')
-          .select('*')
+          .select('*, author:profiles!posts_author_id_fkey(full_name, email), assigned_reviewer:profiles!posts_assigned_reviewer_id_fkey(full_name, email)')
           .eq('id', id)
           .single()
         if (retryErr) throw retryErr
-        if (!isAdmin && data.author_id !== user.id) {
+        const canReview =
+          isSuperAdmin ||
+          isCommunicationsAdmin ||
+          (isSupervisor && data.assigned_reviewer_id === user?.id)
+        const isOwnPostFeedback = isContributor && data.author_id === user?.id
+
+        if (!canReview && !isOwnPostFeedback) {
           setPermissionDenied(true)
         } else {
           setPost(data)
@@ -186,7 +216,7 @@ export default function ReviewPostPage() {
     )
   }
 
-  // ---------------- Permission denied (e.g. contributor opening another author's post) ----------------
+  // ---------------- Permission Denied ----------------
   if (permissionDenied) {
     return (
       <div className="dashboard-content-wrapper">
@@ -194,19 +224,20 @@ export default function ReviewPostPage() {
           <ShieldAlert size={48} className="error-state-icon" style={{ color: 'var(--dash-gold)' }} />
           <h3>Access Restricted</h3>
           <p>
-            You can only view review feedback attached to your own posts. If you believe this is a
-            mistake, please contact the communications team.
+            {isSupervisor
+              ? 'You do not have review permission for this submission because it is not assigned to you.'
+              : 'You can only view review feedback attached to your own posts. If you believe this is a mistake, please contact the communications team.'}
           </p>
           <button className="retry-btn" onClick={() => navigate('/dashboard/review')}>
             <ArrowLeft size={16} />
-            <span>Back to Review Feedback</span>
+            <span>{isSupervisor || isSuperAdmin || isCommunicationsAdmin ? 'Back to Review Queue' : 'Back to Review Feedback'}</span>
           </button>
         </div>
       </div>
     )
   }
 
-  // ---------------- Not found / load error ----------------
+  // ---------------- Not found / Load Error ----------------
   if (error || !post) {
     const isConnErr =
       error?.message?.toLowerCase().includes('failed to fetch') ||
@@ -230,6 +261,11 @@ export default function ReviewPostPage() {
     )
   }
 
+  const canReview =
+    isSuperAdmin ||
+    isCommunicationsAdmin ||
+    (isSupervisor && post.assigned_reviewer_id === user?.id)
+
   const contributorStatus = (post.status || 'draft').toLowerCase()
 
   return (
@@ -244,10 +280,10 @@ export default function ReviewPostPage() {
             style={{ marginBottom: '12px' }}
           >
             <ArrowLeft size={14} />
-            <span>{isAdmin ? 'Back to Review Queue' : 'Back to Review Feedback'}</span>
+            <span>{canReview ? 'Back to Review Queue' : 'Back to Review Feedback'}</span>
           </button>
           <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--dash-navy)' }}>
-            {isAdmin ? 'Review Submission' : 'Review Feedback'}
+            {canReview ? 'Review Submission' : 'Review Feedback'}
           </h2>
           <p style={{ margin: '4px 0 0 0', fontSize: '14px', color: 'var(--dash-text-secondary)' }}>
             Read-only preview of "{post.title || 'Untitled'}"
@@ -364,8 +400,8 @@ export default function ReviewPostPage() {
 
         {/* ---------------- Right: Review controls ---------------- */}
         <div className="editor-settings-sidebar">
-          {/* Card: Administrator decision controls */}
-          {isAdmin ? (
+          {/* Reviewer controls (Super Admin, Comms Admin, or Assigned Supervisor) */}
+          {canReview ? (
             <>
               <div className="editor-card">
                 <h2>Review Decision</h2>
@@ -407,7 +443,7 @@ export default function ReviewPostPage() {
                   )}
                   {contributorStatus === 'in_review' && (
                     <p className="review-contributor-hint">
-                      Awaiting Review — an administrator will look at your submission shortly.
+                      Awaiting Review — a reviewer will look at your submission shortly.
                     </p>
                   )}
                   {contributorStatus === 'published' && (
@@ -424,7 +460,7 @@ export default function ReviewPostPage() {
                 {contributorStatus !== 'draft' && (
                   <p className="uploader-hint" style={{ marginTop: '12px' }}>
                     <MessageSquareText size={12} style={{ verticalAlign: '-2px', marginRight: '4px' }} />
-                    If an administrator returns this post to draft, you will be able to edit it from here.
+                    If a reviewer returns this post to draft, you will be able to edit it from here.
                   </p>
                 )}
               </div>

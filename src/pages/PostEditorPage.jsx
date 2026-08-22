@@ -1,64 +1,73 @@
 import React, { useState, useEffect } from 'react'
-import { useParams, useNavigate, useLocation } from 'react-router-dom'
+import { useParams, useNavigate, Link } from 'react-router-dom'
 import { useForm, Controller } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
-import * as z from 'zod'
 import { useAuth } from '../context/AuthContext'
 import { supabase } from '../lib/supabaseClient'
+import { postSchema } from '../utils/validationSchemas'
 import { createSlug } from '../utils/createSlug'
-import RichTextEditor from '../components/posts/RichTextEditor'
 import FeaturedImageUploader from '../components/posts/FeaturedImageUploader'
+import RichTextEditor from '../components/posts/RichTextEditor'
 import SubmissionModal from '../components/posts/SubmissionModal'
-import { ArrowLeft, Save, Sparkles, CheckCircle2, AlertTriangle, FileCheck, MessageSquareText, ChevronDown, ChevronUp, Lock } from 'lucide-react'
+import { formatRole } from '../utils/formatRole'
+import {
+  Save,
+  FileCheck,
+  CheckCircle2,
+  ArrowLeft,
+  AlertTriangle,
+  Lock,
+  ShieldAlert,
+  MessageSquareText,
+  ChevronDown,
+  ChevronUp
+} from 'lucide-react'
 import '../styles/posts.css'
 
-// Form Zod Validation Schema
-const schema = z.object({
-  type: z.enum(['news', 'blog'], {
-    errorMap: () => ({ message: 'Post type must be News or Blog.' })
-  }),
-  title: z
-    .string()
-    .min(1, 'Title is required.')
-    .max(200, 'Title cannot exceed 200 characters.'),
-  slug: z
-    .string()
-    .min(1, 'Slug is required.')
-    .regex(/^[a-z0-9-_]+$/, 'Slug must contain only lowercase letters, numbers, dashes, or underscores.'),
-  excerpt: z
-    .string()
-    .min(1, 'Excerpt summary is required.')
-    .max(500, 'Excerpt summary cannot exceed 500 characters.'),
-  content: z.string().min(1, 'Article content is required.'),
-  featured_image_url: z.string().url('Featured image is required.'),
-  featured_image_alt: z.string().min(1, 'Alternative description text is required.'),
-  region: z.string().optional(),
-  theme: z.string().optional(),
-  seo_title: z.string().optional(),
-  seo_description: z.string().optional(),
-  hero_position: z.enum(['none', 'primary', 'secondary']).optional(),
-  featured_until: z.string().nullable().optional()
-})
+// Internal diagnostic logger — surfaces complete Supabase error context in dev console
+const logSaveError = (operation, err, payload = {}) => {
+  console.error(`[AASU CMS Error] ${operation} failed:`, {
+    operation,
+    code: err?.code ?? null,
+    message: err?.message ?? null,
+    details: err?.details ?? null,
+    hint: err?.hint ?? null,
+    payload
+  })
+}
 
 export default function PostEditorPage() {
-  const { id } = useParams() // For editing posts
-  const isEditMode = !!id
+  const { id } = useParams()
   const navigate = useNavigate()
-  const location = useLocation()
+  const isEditMode = Boolean(id)
+
   const { user, profile, loading: authLoading } = useAuth()
-  const userRole = profile?.role || 'contributor'
+  const userRole = (profile?.role || '').toLowerCase()
+
+  // Explicit role booleans
+  const isSuperAdmin = userRole === 'super_admin'
+  const isCommunicationsAdmin = userRole === 'communications_admin'
+  const isSupervisor = userRole === 'supervisor'
+  const isContributor = userRole === 'contributor'
+
+  const canPublishDirectly = isSuperAdmin || isCommunicationsAdmin || isSupervisor
+  const canManageHero = isSuperAdmin || isCommunicationsAdmin
 
   // Component States
   const [categories, setCategories] = useState([])
   const [selectedCategoryIds, setSelectedCategoryIds] = useState([])
   const [originalPost, setOriginalPost] = useState(null)
+  const [postLoaded, setPostLoaded] = useState(!isEditMode)
+  const [permissionDenied, setPermissionDenied] = useState(false)
+
   // Editorial feedback notes attached to a returned draft
   const [reviewNotes, setReviewNotes] = useState([])
-  // Collapsible older-notes history inside the feedback panel
   const [showFeedbackHistory, setShowFeedbackHistory] = useState(false)
+
   // Contributor submission confirmation modal (optional note to the reviewer)
   const [pendingSubmission, setPendingSubmission] = useState(null)
   const [submissionNote, setSubmissionNote] = useState('')
+
   // Supervisor assignment for contributor submission
   const [supervisors, setSupervisors] = useState([])
   const [selectedSupervisorId, setSelectedSupervisorId] = useState('')
@@ -66,274 +75,263 @@ export default function PostEditorPage() {
 
   const [isLoading, setIsLoading] = useState(isEditMode)
   const [isSubmitting, setIsSubmitting] = useState(false)
-  const [saveStatus, setSaveStatus] = useState(null) // { type: 'success'|'error'|'warning', message: '' }
+  const [saveStatus, setSaveStatus] = useState(null)
 
   // React Hook Form initialization
   const {
     register,
     handleSubmit,
-    control,
     setValue,
     watch,
-    getValues,
-    formState: { errors, isDirty }
+    control,
+    reset,
+    formState: { errors }
   } = useForm({
-    resolver: zodResolver(schema),
+    resolver: zodResolver(postSchema),
     defaultValues: {
-      type: 'news',
       title: '',
       slug: '',
       excerpt: '',
       content: '',
       featured_image_url: '',
       featured_image_alt: '',
+      type: 'news',
       region: '',
       theme: '',
-      seo_title: '',
-      seo_description: '',
       hero_position: 'none',
-      featured_until: ''
+      featured_until: '',
+      seo_title: '',
+      seo_description: ''
     }
   })
 
-  const titleVal = watch('title')
-  const slugVal = watch('slug')
+  const watchTitle = watch('title')
 
-  // Warn about unsaved changes on tab close/unload
+  // Auto-generate URL slug from Title on initial post creation
   useEffect(() => {
-    const handleBeforeUnload = (e) => {
-      if (isDirty) {
-        e.preventDefault()
-        e.returnValue = ''
-      }
+    if (!isEditMode && watchTitle) {
+      setValue('slug', createSlug(watchTitle), { shouldValidate: true })
     }
-    window.addEventListener('beforeunload', handleBeforeUnload)
-    return () => window.removeEventListener('beforeunload', handleBeforeUnload)
-  }, [isDirty])
+  }, [watchTitle, isEditMode, setValue])
 
-  // Surface cross-page notifications once (e.g. partial submission warning)
+  // Load Categories & (if Edit Mode) Post Details & Review Notes
   useEffect(() => {
-    const state = location.state
-    if (state?.message) {
-      setSaveStatus({ type: state.type || 'success', message: state.message })
-      window.history.replaceState(null, '')
-    }
-  }, [location.state])
-
-  // Fetch categories on mount
-  useEffect(() => {
+    if (authLoading) return
     let isMounted = true
-    const fetchCategories = async () => {
+
+    async function loadData() {
+      if (isEditMode) {
+        setIsLoading(true)
+        setPostLoaded(false)
+        setPermissionDenied(false)
+      }
+
       try {
-        const { data, error: catErr } = await supabase
+        // 1. Fetch Categories
+        const { data: catData, error: catErr } = await supabase
           .from('categories')
           .select('id, name')
-          .order('name')
-        
-        if (catErr) throw catErr
-        if (isMounted) setCategories(data || [])
-      } catch (err) {
-        console.error('Error fetching categories:', err)
-      }
-    }
-    fetchCategories()
-    return () => {
-      isMounted = false
-    }
-  }, [])
+          .order('name', { ascending: true })
 
-  // Auto-generate slug from title (only if not in edit mode or slug has not been manually customized)
-  useEffect(() => {
-    if (!isEditMode && titleVal) {
-      setValue('slug', createSlug(titleVal), { shouldValidate: true })
-    }
-  }, [titleVal, setValue, isEditMode])
-
-  // Load existing post in edit mode
-  useEffect(() => {
-    if (!isEditMode || authLoading) return
-    let isMounted = true
-
-    const loadPost = async () => {
-      setIsLoading(true)
-      try {
-        // 1. Fetch Post details
-        const { data: post, error: postErr } = await supabase
-          .from('posts')
-          .select('*')
-          .eq('id', id)
-          .single()
-
-        if (postErr) throw postErr
-        if (!post) throw new Error('Post not found.')
-
-        // 2. Fetch selected Category connections
-        const { data: catConnections, error: connErr } = await supabase
-          .from('post_categories')
-          .select('category_id')
-          .eq('post_id', id)
-        
-        if (connErr) throw connErr
-
-        if (isMounted) {
-          setOriginalPost(post)
-          
-          // Populate form fields
-          setValue('type', post.type || 'news')
-          setValue('title', post.title || '')
-          setValue('slug', post.slug || '')
-          setValue('excerpt', post.excerpt || '')
-          setValue('content', post.content || '')
-          setValue('featured_image_url', post.featured_image_url || '')
-          setValue('featured_image_alt', post.featured_image_alt || '')
-          setValue('region', post.region || '')
-          setValue('theme', post.theme || '')
-          setValue('seo_title', post.seo_title || '')
-          setValue('seo_description', post.seo_description || '')
-          setValue('hero_position', post.hero_position || 'none')
-          
-          // Convert date to HTML format yyyy-MM-dd if present
-          if (post.featured_until) {
-            const formattedDate = new Date(post.featured_until).toISOString().split('T')[0]
-            setValue('featured_until', formattedDate)
-          } else {
-            setValue('featured_until', '')
-          }
-
-          setSelectedCategoryIds(catConnections.map((conn) => conn.category_id))
+        if (catErr) {
+          logSaveError('categories.select', catErr)
+        } else if (isMounted && catData) {
+          setCategories(catData)
         }
 
-        // 3. Fetch editorial feedback when the draft was returned with review notes
-        if (post.status === 'draft') {
-          try {
-            let notesResult = await supabase
-              .from('review_notes')
-              .select('*, author:profiles!review_notes_author_id_fkey(full_name, email)')
-              .eq('post_id', id)
-              .order('created_at', { ascending: false })
+        // 2. Fetch Post Record if Edit Mode
+        if (isEditMode) {
+          const { data: postData, error: postErr } = await supabase
+            .from('posts')
+            .select('*')
+            .eq('id', id)
+            .single()
 
-            if (notesResult.error) {
-              console.warn('Review notes join failed, running fallback query:', notesResult.error)
-              notesResult = await supabase
+          if (postErr) {
+            console.error('[AASU CMS Post Fetch Error]', {
+              code: postErr.code ?? null,
+              message: postErr.message ?? null,
+              details: postErr.details ?? null,
+              hint: postErr.hint ?? null,
+              postId: id,
+              errorObj: postErr
+            })
+            throw postErr
+          }
+
+          if (import.meta.env.DEV && postData) {
+            console.log('[AASU CMS Post Fetch Diagnostics]', {
+              postId: postData.id,
+              hasContent: Boolean(postData.content),
+              contentLength: postData.content ? postData.content.length : 0,
+              hasFeaturedImage: Boolean(postData.featured_image_url),
+              featuredImageUrl: postData.featured_image_url || null,
+              authorId: postData.author_id,
+              status: postData.status
+            })
+          }
+
+          if (isMounted && postData) {
+            // Authorization verification for edit mode
+            let isAuthorizedToEdit = false
+
+            if (isSuperAdmin || isCommunicationsAdmin) {
+              isAuthorizedToEdit = true
+            } else if (isSupervisor) {
+              if (postData.author_id === user.id || postData.assigned_reviewer_id === user.id) {
+                isAuthorizedToEdit = true
+              } else {
+                // Check if an active supervisor assignment exists
+                const { data: assignment } = await supabase
+                  .from('supervisor_assignments')
+                  .select('id')
+                  .eq('supervisor_id', user.id)
+                  .eq('contributor_id', postData.author_id)
+                  .eq('is_active', true)
+                  .maybeSingle()
+                if (assignment) {
+                  isAuthorizedToEdit = true
+                }
+              }
+            } else if (isContributor) {
+              if (postData.author_id === user.id) {
+                isAuthorizedToEdit = true
+              }
+            }
+
+            if (!isAuthorizedToEdit) {
+              setPermissionDenied(true)
+              setIsLoading(false)
+              return
+            }
+
+            setOriginalPost(postData)
+
+            // Populate form fields with existing post values
+            reset({
+              title: postData.title || '',
+              slug: postData.slug || '',
+              excerpt: postData.excerpt || '',
+              content: postData.content || '',
+              featured_image_url: postData.featured_image_url || '',
+              featured_image_alt: postData.featured_image_alt || '',
+              type: postData.type || 'news',
+              region: postData.region || '',
+              theme: postData.theme || '',
+              hero_position: postData.hero_position || 'none',
+              featured_until: postData.featured_until
+                ? postData.featured_until.split('T')[0]
+                : '',
+              seo_title: postData.seo_title || '',
+              seo_description: postData.seo_description || ''
+            })
+
+            setPostLoaded(true)
+
+            // Fetch attached Category IDs
+            const { data: pcData, error: pcErr } = await supabase
+              .from('post_categories')
+              .select('category_id')
+              .eq('post_id', id)
+
+            if (pcErr) {
+              logSaveError('post_categories.select', pcErr, { id })
+            } else if (isMounted && pcData) {
+              setSelectedCategoryIds(pcData.map((item) => item.category_id))
+            }
+
+            // Fetch attached Review Notes
+            try {
+              let notesResult = await supabase
                 .from('review_notes')
-                .select('*')
+                .select('*, author:profiles!review_notes_author_id_fkey(full_name, email, role)')
                 .eq('post_id', id)
                 .order('created_at', { ascending: false })
-            }
 
-            if (!notesResult.error && isMounted) {
-              // The "Changes Requested" panel shows reviewer feedback only —
-              // contributor submission notes live in the editorial conversation.
-              setReviewNotes(
-                (notesResult.data || []).filter(
-                  (n) => (n.note_type || 'reviewer_feedback') === 'reviewer_feedback'
-                )
-              )
+              if (notesResult.error) {
+                notesResult = await supabase
+                  .from('review_notes')
+                  .select('*')
+                  .eq('post_id', id)
+                  .order('created_at', { ascending: false })
+              }
+
+              if (isMounted && notesResult.data) {
+                setReviewNotes(notesResult.data)
+              }
+            } catch (notesErr) {
+              console.warn('Could not load review notes for draft editor:', notesErr)
             }
-          } catch (notesErr) {
-            console.warn('Could not load review notes for the editor:', notesErr)
           }
         }
       } catch (err) {
-        console.error('Error loading post:', err)
+        console.error('Error initializing post editor:', err)
         if (isMounted) {
           setSaveStatus({
             type: 'error',
-            message: 'Failed to load post data from the database. Please return to the posts list.'
+            message: 'Failed to load post details for editing. Please check your connection.'
           })
         }
       } finally {
-        if (isMounted) {
-          setIsLoading(false)
-        }
+        if (isMounted) setIsLoading(false)
       }
     }
 
-    loadPost()
+    loadData()
+
     return () => {
       isMounted = false
     }
-  }, [id, isEditMode, authLoading, setValue])
+  }, [id, isEditMode, reset, authLoading, user, isSuperAdmin, isCommunicationsAdmin, isSupervisor, isContributor])
 
-  const handleCategoryToggle = (catId) => {
+  // Category selection handler
+  const handleCategoryToggle = (categoryId) => {
     setSelectedCategoryIds((prev) =>
-      prev.includes(catId) ? prev.filter((id) => id !== catId) : [...prev, catId]
+      prev.includes(categoryId)
+        ? prev.filter((catId) => catId !== categoryId)
+        : [...prev, categoryId]
     )
   }
 
-  const handleRegenerateSlug = () => {
-    if (titleVal) {
-      setValue('slug', createSlug(titleVal), { shouldValidate: true, shouldDirty: true })
-    }
-  }
-
+  // Cancel edit/create — return to posts page safely
   const handleCancelClick = () => {
-    if (isDirty) {
-      const confirm = window.confirm(
-        'You have unsaved changes in this post editor. Are you sure you want to discard them and return to the posts list?'
-      )
-      if (!confirm) return
-    }
-    navigate('/dashboard/posts')
+    const targetRoute = isSupervisor ? '/dashboard/team-posts' : '/dashboard/posts'
+    navigate(targetRoute)
   }
 
-  // Format a timestamp including date and time for review notes
-  const formatDateTime = (dateStr) => {
-    if (!dateStr) return 'N/A'
-    try {
-      const date = new Date(dateStr)
-      if (isNaN(date.getTime())) return 'N/A'
-      return date.toLocaleDateString(undefined, {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit'
-      })
-    } catch (e) {
-      return 'N/A'
-    }
-  }
-
-  // Human-readable reviewer name — never expose raw UUIDs
-  const resolveReviewer = (note) => {
-    if (note.author?.full_name) return note.author.full_name
-    if (note.author?.email) return note.author.email
-    return 'Administrator'
-  }
-
-  // Structured diagnostics for Supabase save failures.
-  // Logs the exact failing operation plus the full error object
-  // (code, message, details, hint) so constraint/RLS violations are never hidden.
-  const logSaveError = (operation, err, payload = null) => {
-    console.error('[AASU CMS] Post save operation failed.', {
-      operation,
-      code: err?.code ?? null,
-      message: err?.message ?? null,
-      details: err?.details ?? null,
-      hint: err?.hint ?? null,
-      error: err
-    })
-    if (import.meta.env.DEV && payload) {
-      console.error('[AASU CMS] Payload sent with the failing operation:', payload)
-    }
-  }
-
-  // Common Post Saving Logic.
-  // Returns true on success, false on failure — contributor submissions use
-  // the result to keep the confirmation modal open (preserving the typed note)
-  // whenever the status update fails.
+  // Common Post Saving Logic
   const handleSavePost = async (formValues, statusAction, contributorNote = null, assignedReviewerId = null) => {
+    if (isEditMode && (!postLoaded || isLoading)) {
+      setSaveStatus({
+        type: 'error',
+        message: 'Please wait for the post data to finish loading before saving.'
+      })
+      return false
+    }
+
+    // Safety Protection: Never replace non-empty stored content with empty value caused by hydration failure
+    if (
+      isEditMode &&
+      originalPost?.content &&
+      (!formValues.content || formValues.content.trim() === '' || formValues.content === '<p></p>')
+    ) {
+      setSaveStatus({
+        type: 'error',
+        message: 'Content hydration check failed. Existing article content cannot be overwritten with an empty value.'
+      })
+      return false
+    }
+
     setIsSubmitting(true)
     setSaveStatus(null)
 
-    const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
-    const isContributorSubmit = !isAdminRole && statusAction === 'submit'
+    const isContributorSubmit = isContributor && statusAction === 'submit'
+    const isSupervisorPublish = isSupervisor && statusAction === 'publish'
 
     try {
       const currentSlug = formValues.slug.toLowerCase().trim()
 
-      // 1. Slug collision check (cannot overwrite silently)
+      // 1. Slug collision check
       let query = supabase.from('posts').select('id').eq('slug', currentSlug)
       if (isEditMode) {
         query = query.neq('id', id)
@@ -351,15 +349,14 @@ export default function PostEditorPage() {
         )
       }
 
-      // Resolve the live authenticated Supabase Auth user once per save attempt.
-      // Never use profile email/name, cached localStorage IDs or another user's ID.
+      // Resolve live authenticated user
       const { data: authSession } = await supabase.auth.getSession()
       const authenticatedUser = authSession?.session?.user || user
       if (!authenticatedUser?.id) {
         throw new Error('Your session has expired. Please sign in again to save posts.')
       }
 
-      // 2. Build Database columns payload — all enum fields must be exact lowercase PostgreSQL values
+      // 2. Build Database columns payload
       const contentFields = {
         title: formValues.title,
         slug: currentSlug,
@@ -367,7 +364,6 @@ export default function PostEditorPage() {
         content: formValues.content,
         featured_image_url: formValues.featured_image_url,
         featured_image_alt: formValues.featured_image_alt,
-        // 'type' comes from the form as a lowercase enum value (news | blog)
         type: formValues.type,
         region: formValues.region || null,
         theme: formValues.theme || null,
@@ -377,7 +373,6 @@ export default function PostEditorPage() {
 
       let payload
       if (!isEditMode) {
-        // Explicit lifecycle values for every new post, regardless of role
         payload = {
           ...contentFields,
           author_id: authenticatedUser.id,
@@ -388,112 +383,90 @@ export default function PostEditorPage() {
           submitted_at: null,
           scheduled_for: null,
           reviewed_by: null,
-          reviewed_at: null
+          reviewed_at: null,
+          assigned_reviewer_id: null
         }
 
-        if (isAdminRole) {
-          // Homepage settings only when the interface supplies them; empty featured_until -> null
+        if (canManageHero) {
           payload.hero_position = formValues.hero_position || 'none'
           payload.featured_until = formValues.featured_until || null
-          // Administrator status transitions on creation
           if (statusAction === 'publish') {
             payload.status = 'published'
             payload.published_at = new Date().toISOString()
+            payload.reviewed_by = authenticatedUser.id
+            payload.reviewed_at = new Date().toISOString()
           } else if (statusAction === 'submit') {
             payload.status = 'in_review'
             payload.submitted_at = new Date().toISOString()
           }
         }
-        // Contributors: status stays forced to 'draft', hero_position to 'none'.
 
-        // Guard: the post author must equal the authenticated Supabase Auth user
         if (payload.author_id !== authenticatedUser.id) {
           throw new Error('Author verification failed. The post author must be the signed-in user.')
         }
 
-        // Remove undefined values but preserve explicit null lifecycle values
         payload = Object.fromEntries(
           Object.entries(payload).filter(([, value]) => value !== undefined)
         )
-
-        if (import.meta.env.DEV) {
-          // Sanitized insert payload — contains no tokens or session secrets
-          console.info('[AASU CMS] Sanitized insert payload:', payload)
-        }
       } else {
-        // Edit mode — contributors may only update their own posts
-        if (!isAdminRole && originalPost.author_id !== authenticatedUser.id) {
-          throw new Error('Author verification failed. You can only update your own posts.')
-        }
-
-        // Preserve the original author and untouched lifecycle columns
         payload = {
           ...contentFields,
           author_id: originalPost.author_id
         }
 
-        // Administrator controls — hero_position is a lowercase enum: none | primary | secondary
-        if (isAdminRole) {
-          // Default to 'none' if not set; form already stores lowercase values
+        if (canManageHero) {
           payload.hero_position = formValues.hero_position || 'none'
           payload.featured_until = formValues.featured_until || null
+        } else {
+          payload.hero_position = 'none'
+          payload.featured_until = null
         }
 
-        // Status-specific updates — all status values are lowercase enums
         if (statusAction === 'publish') {
           payload.status = 'published'
-          // Preserve original published_at if it already exists
           payload.published_at = originalPost?.published_at || new Date().toISOString()
-        } else if (statusAction === 'submit' && isAdminRole) {
-          payload.status = 'in_review'
-          payload.submitted_at = new Date().toISOString()
+          payload.reviewed_by = authenticatedUser.id
+          payload.reviewed_at = new Date().toISOString()
+          payload.assigned_reviewer_id = null
         } else if (statusAction === 'submit') {
-          // Contributor resubmission: a single update saves the revision and
-          // transitions to in_review while clearing the previous review cycle —
-          // reviewed_by / reviewed_at describe the current cycle, not history.
           payload.status = 'in_review'
           payload.submitted_at = new Date().toISOString()
           payload.hero_position = 'none'
           payload.published_at = null
           payload.reviewed_by = null
           payload.reviewed_at = null
-          // Assign reviewer (supervisor) when provided
           if (assignedReviewerId) {
             payload.assigned_reviewer_id = assignedReviewerId
           }
         } else {
           // draft — default save action
-          payload.status = 'draft'
+          payload.status = originalPost?.status === 'published' ? 'published' : 'draft'
         }
       }
+
       // 3. Upsert Post Record
       let savedPost = null
+      let publicationFailedAfterDraft = false
       let submissionFailedAfterDraft = false
+
       if (isEditMode) {
-        // Contributors must target both the post ID and their own author_id
         let updateQuery = supabase.from('posts').update(payload).eq('id', id)
-        if (!isAdminRole) {
+        if (isContributor) {
           updateQuery = updateQuery.eq('author_id', authenticatedUser.id)
         }
         const { data, error: updateErr } = await updateQuery.select().single()
 
         if (updateErr) {
-          // Exact posts.update failure — never hidden from the console
           console.error({
             code: updateErr.code,
             message: updateErr.message,
             details: updateErr.details,
             hint: updateErr.hint,
-            payload,
-            authenticatedUserId: authenticatedUser?.id ?? null,
-            existingPostAuthorId: originalPost?.author_id ?? null,
-            existingPostStatus: originalPost?.status ?? null
+            payload
           })
           throw updateErr
         }
         savedPost = data
-        // Contributor resubmissions are completed by the single update above —
-        // no separate in_review transition is needed in edit mode.
       } else {
         const { data, error: insertErr } = await supabase
           .from('posts')
@@ -502,7 +475,6 @@ export default function PostEditorPage() {
           .single()
         
         if (insertErr) {
-          // Complete Supabase error for the failing insert — never hidden from the console
           console.error({
             code: insertErr.code,
             message: insertErr.message,
@@ -515,9 +487,33 @@ export default function PostEditorPage() {
         savedPost = data
       }
 
-      // Two-step contributor submission on initial creation: the insert lands as a
-      // draft first, then the new post is immediately moved to in_review with the
-      // exact lifecycle reset used for every contributor submission/resubmission.
+      // Supervisor Publish on New Creation
+      if (!isEditMode && isSupervisorPublish) {
+        const publishUpdate = {
+          status: 'published',
+          published_at: new Date().toISOString(),
+          reviewed_by: authenticatedUser.id,
+          reviewed_at: new Date().toISOString(),
+          hero_position: 'none',
+          assigned_reviewer_id: null
+        }
+
+        const { data: pubData, error: pubErr } = await supabase
+          .from('posts')
+          .update(publishUpdate)
+          .eq('id', savedPost.id)
+          .select()
+          .single()
+
+        if (pubErr) {
+          console.error('[AASU CMS] Supervisor publish update failed:', pubErr)
+          publicationFailedAfterDraft = true
+        } else if (pubData) {
+          savedPost = pubData
+        }
+      }
+
+      // Contributor Submission on New Creation
       if (!isEditMode && isContributorSubmit) {
         const submissionUpdate = {
           status: 'in_review',
@@ -527,7 +523,6 @@ export default function PostEditorPage() {
           reviewed_by: null,
           reviewed_at: null
         }
-        // Assign reviewer (supervisor) for new contributor posts
         if (assignedReviewerId) {
           submissionUpdate.assigned_reviewer_id = assignedReviewerId
         }
@@ -538,26 +533,16 @@ export default function PostEditorPage() {
           .eq('author_id', authenticatedUser.id)
 
         if (submitUpdateErr) {
-          console.error({
-            code: submitUpdateErr.code,
-            message: submitUpdateErr.message,
-            details: submitUpdateErr.details,
-            hint: submitUpdateErr.hint,
-            payload: submissionUpdate,
-            authenticatedUserId: authenticatedUser.id,
-            existingPostAuthorId: authenticatedUser.id,
-            existingPostStatus: 'draft'
-          })
+          console.error('[AASU CMS] Contributor submission update failed:', submitUpdateErr)
           submissionFailedAfterDraft = true
         }
       }
 
-      // Optional contributor submission note — never empty, never duplicated
+      // Optional contributor submission note
       let noteFailed = false
       const trimmedSubmissionNote = (contributorNote || '').trim()
       if (isContributorSubmit && !submissionFailedAfterDraft && trimmedSubmissionNote) {
         try {
-          // Duplicate guard so retries never attach the same note twice
           const { data: existingNote } = await supabase
             .from('review_notes')
             .select('id')
@@ -577,20 +562,14 @@ export default function PostEditorPage() {
             if (noteErr) throw noteErr
           }
         } catch (noteErr) {
-          console.error('[AASU CMS] Contributor submission note could not be attached.', {
-            code: noteErr?.code ?? null,
-            message: noteErr?.message ?? null,
-            details: noteErr?.details ?? null,
-            hint: noteErr?.hint ?? null
-          })
+          console.error('[AASU CMS] Contributor submission note could not be attached.', noteErr)
           noteFailed = true
         }
       }
 
-      // 4. Save Category Assignments safely (do not fail post save if categories mapping fails)
+      // 4. Save Category Assignments safely
       let categoryAssignmentSuccess = true
       try {
-        // Clear previous categories
         const { error: clearErr } = await supabase
           .from('post_categories')
           .delete()
@@ -598,7 +577,6 @@ export default function PostEditorPage() {
         
         if (clearErr) throw clearErr
 
-        // Insert new mappings
         if (selectedCategoryIds.length > 0) {
           const mappings = selectedCategoryIds.map((catId) => ({
             post_id: savedPost.id,
@@ -615,30 +593,28 @@ export default function PostEditorPage() {
         categoryAssignmentSuccess = false
       }
 
-      // 5. Report save state
-      if (submissionFailedAfterDraft) {
-        // New-post flow: the draft exists — continue on its edit page so retrying never duplicates the post
+      // 5. Report save state & Navigation
+      const targetListRoute = isSupervisor ? '/dashboard/team-posts' : '/dashboard/posts'
+
+      if (publicationFailedAfterDraft) {
+        navigate(`/dashboard/posts/${savedPost.id}/edit`, {
+          state: {
+            type: 'warning',
+            message: 'Your post was saved as a draft, but it could not be published.'
+          }
+        })
+      } else if (submissionFailedAfterDraft) {
         navigate(`/dashboard/posts/${savedPost.id}/edit`, {
           state: {
             type: 'warning',
             message: 'Your post was saved as a draft, but it could not be submitted for review.'
           }
         })
-      } else if (!categoryAssignmentSuccess && !isContributorSubmit) {
-        setSaveStatus({
-          type: 'warning',
-          message: 'Post saved successfully, but category assignment failed. Please open the post again to re-apply categories.'
+      } else if (statusAction === 'publish') {
+        navigate(targetListRoute, {
+          state: { type: 'success', message: 'Published successfully' }
         })
-      } else if (isContributorSubmit && noteFailed) {
-        // The post is safely in review — only the note failed. Stay in place
-        // (modal remains open, note preserved) with the mandated warning.
-        setSaveStatus({
-          type: 'warning',
-          message: 'Your post was submitted, but the note could not be attached.'
-        })
-        return false
       } else if (isContributorSubmit) {
-        // Contributor submission confirmed — back to My Posts with the notice
         navigate('/dashboard/posts', {
           state: noteFailed
             ? {
@@ -648,15 +624,14 @@ export default function PostEditorPage() {
             : { type: 'success', message: 'Submitted for review successfully' }
         })
       } else {
-        // Success -> redirect
-        navigate('/dashboard/posts')
+        navigate(targetListRoute, {
+          state: { type: 'success', message: 'Saved as draft' }
+        })
       }
       return true
     } catch (err) {
-      // Log full technical error for development debugging
       console.error('Post save failed:', err)
 
-      // Show a friendly message to the user — avoid exposing raw DB internals
       const isNetworkErr =
         err.message?.toLowerCase().includes('failed to fetch') ||
         err.message?.toLowerCase().includes('networkerror')
@@ -667,12 +642,10 @@ export default function PostEditorPage() {
       if (isNetworkErr) {
         friendlyMessage = 'Network error. Please check your internet connection and try again.'
       } else if (isSlugConflict) {
-        friendlyMessage = err.message // Slug collision messages are already user-friendly
+        friendlyMessage = err.message
       }
 
       setSaveStatus({ type: 'error', message: friendlyMessage })
-      // Contributor submissions fail in place: the modal stays open, the typed
-      // note is preserved and no note was inserted. Other flows return false too.
       return false
     } finally {
       setIsSubmitting(false)
@@ -684,15 +657,8 @@ export default function PostEditorPage() {
     await handleSavePost(formValues, 'draft')
   }
 
-  // Handler for Submit Review — contributors confirm via a modal with an
-  // optional note; administrators submit directly.
+  // Handler for Submit Review (Contributor Only)
   const onSubmitReview = async (formValues) => {
-    const isAdminRole = userRole === 'super_admin' || userRole === 'communications_admin'
-    if (isAdminRole) {
-      await handleSavePost(formValues, 'submit')
-      return
-    }
-    // Load supervisors before opening modal
     setIsLoadingSupervisors(true)
     setSubmissionNote('')
     setPendingSubmission(formValues)
@@ -708,7 +674,6 @@ export default function PostEditorPage() {
           .map(a => a.supervisor)
           .filter(Boolean)
         setSupervisors(svs)
-        // Pre-select if resubmitting a returned post that already has an assigned reviewer
         if (svs.length === 1) {
           setSelectedSupervisorId(svs[0].id)
         } else if (isEditMode && originalPost?.assigned_reviewer_id) {
@@ -730,9 +695,7 @@ export default function PostEditorPage() {
     }
   }
 
-  // Modal confirmation — runs the submission flow with the optional note.
-  // The modal closes only after a successful submission; on failure it stays
-  // open so the contributor's typed note is preserved for a retry.
+  // Modal confirmation for contributor submission
   const handleConfirmSubmission = async () => {
     const formValues = pendingSubmission
     const success = await handleSavePost(formValues, 'submit', submissionNote, selectedSupervisorId)
@@ -741,11 +704,10 @@ export default function PostEditorPage() {
     }
   }
 
-  // Handler for Publish (requires Admin credentials and confirm dialog)
+  // Handler for Publish Now (Super Admin, Comms Admin, or Supervisor)
   const onPublish = async (formValues) => {
-    // Administrator confirmation check
     const confirm = window.confirm(
-      'Are you sure you want to publish this post? It will become visible on the public website immediately.'
+      'Publish this post now? It will become visible on the AASU website.'
     )
     if (!confirm) return
 
@@ -761,10 +723,32 @@ export default function PostEditorPage() {
     )
   }
 
-  const isAdmin = userRole === 'super_admin' || userRole === 'communications_admin'
+  if (permissionDenied) {
+    return (
+      <div className="dashboard-content-wrapper">
+        <div className="error-state">
+          <ShieldAlert size={48} className="error-state-icon" style={{ color: 'var(--dash-gold)' }} />
+          <h3>Access Restricted</h3>
+          <p>
+            {isSupervisor
+              ? 'You do not have permission to edit this post because it is not assigned to you.'
+              : 'You can only edit your own posts.'}
+          </p>
+          <button
+            type="button"
+            className="retry-btn"
+            onClick={() => navigate(isSupervisor ? '/dashboard/team-posts' : '/dashboard/posts')}
+          >
+            <ArrowLeft size={16} />
+            <span>{isSupervisor ? 'Back to Team Posts' : 'Back to My Posts'}</span>
+          </button>
+        </div>
+      </div>
+    )
+  }
 
   // Contributors cannot modify a post while it awaits editorial review
-  if (isEditMode && !isAdmin && originalPost?.status === 'in_review') {
+  if (isEditMode && isContributor && originalPost?.status === 'in_review') {
     return (
       <div className="dashboard-content-wrapper">
         <div
@@ -784,7 +768,7 @@ export default function PostEditorPage() {
             }}
           >
             This post has been submitted for review and is locked for editing. You will be able
-            to revise it again once an administrator returns it to draft.
+            to revise it again once a reviewer returns it to draft.
           </p>
           <button type="button" className="edit-action-btn" onClick={() => navigate('/dashboard/posts')}>
             <ArrowLeft size={14} />
@@ -794,6 +778,10 @@ export default function PostEditorPage() {
       </div>
     )
   }
+
+  const latestOwnNote = reviewNotes.find((n) => (n.note_type || 'reviewer_feedback') === 'contributor_note')
+  const latestReviewerNote = reviewNotes.find((n) => (n.note_type || 'reviewer_feedback') === 'reviewer_feedback')
+  const olderNotes = reviewNotes.slice(1)
 
   return (
     <div className="dashboard-content-wrapper">
@@ -817,7 +805,7 @@ export default function PostEditorPage() {
             style={{ marginBottom: '12px' }}
           >
             <ArrowLeft size={14} />
-            <span>Back to Posts</span>
+            <span>{isSupervisor ? 'Back to Team Posts' : 'Back to Posts'}</span>
           </button>
           <h2 style={{ fontSize: '24px', fontWeight: 800, color: 'var(--dash-navy)' }}>
             {isEditMode ? 'Edit Post' : 'Add New Post'}
@@ -849,54 +837,64 @@ export default function PostEditorPage() {
       {isEditMode && reviewNotes.length > 0 && (
         <div className="editor-feedback-panel">
           <div className="editor-feedback-header">
-            <MessageSquareText size={18} />
-            <h3>Changes Requested</h3>
-          </div>
-          <p className="editor-feedback-instruction">
-            An administrator has reviewed this draft and requested changes. Update the article
-            below using their feedback, then submit it for review again. Your feedback history
-            is preserved and visible to the editorial team.
-          </p>
-
-          {/* Latest review note (newest first) */}
-          <div className="review-note-item editor-feedback-latest-note">
-            <div className="review-note-header">
-              <span className="review-note-author">{resolveReviewer(reviewNotes[0])}</span>
-              <span className="review-note-date">{formatDateTime(reviewNotes[0].created_at)}</span>
+            <MessageSquareText size={20} className="editor-feedback-icon" />
+            <div>
+              <h3>Editorial Feedback & Notes</h3>
+              <p>Review feedback attached to this post during editorial review.</p>
             </div>
-            <p className="review-note-text">{reviewNotes[0].note}</p>
           </div>
 
-          {/* Collapsible earlier feedback history */}
-          {reviewNotes.length > 1 && (
-            <div className="editor-feedback-history">
+          {/* Primary highlight note */}
+          {latestReviewerNote ? (
+            <div className="editor-feedback-note-block reviewer">
+              <span className="editor-feedback-note-author">
+                {latestReviewerNote.author?.full_name || latestReviewerNote.author?.email || 'Reviewer'}
+                {latestReviewerNote.author?.role && (
+                  <span className="editor-feedback-role">
+                    {' · '}
+                    {formatRole(latestReviewerNote.author.role)}
+                  </span>
+                )}
+              </span>
+              <p className="editor-feedback-note-text">{latestReviewerNote.note}</p>
+            </div>
+          ) : latestOwnNote ? (
+            <div className="editor-feedback-note-block contributor">
+              <span className="editor-feedback-note-author">Your Submission Note</span>
+              <p className="editor-feedback-note-text">{latestOwnNote.note}</p>
+            </div>
+          ) : null}
+
+          {/* Expandable History */}
+          {olderNotes.length > 0 && (
+            <div className="editor-feedback-history-toggle">
               <button
                 type="button"
-                className="editor-feedback-history-toggle"
+                className="history-toggle-btn"
                 onClick={() => setShowFeedbackHistory(!showFeedbackHistory)}
-                aria-expanded={showFeedbackHistory}
               >
+                <span>{showFeedbackHistory ? 'Hide note history' : `View note history (${olderNotes.length})`}</span>
                 {showFeedbackHistory ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
-                <span>
-                  {showFeedbackHistory
-                    ? 'Hide feedback history'
-                    : `View feedback history (${reviewNotes.length - 1} earlier ${
-                        reviewNotes.length - 1 === 1 ? 'note' : 'notes'
-                      })`}
-                </span>
               </button>
 
               {showFeedbackHistory && (
-                <div className="editor-feedback-notes">
-                  {reviewNotes.slice(1).map((note) => (
-                    <div className="review-note-item" key={note.id}>
-                      <div className="review-note-header">
-                        <span className="review-note-author">{resolveReviewer(note)}</span>
-                        <span className="review-note-date">{formatDateTime(note.created_at)}</span>
+                <div className="editor-feedback-history-list">
+                  {olderNotes.map((note) => {
+                    const isContrib = (note.note_type || 'reviewer_feedback') === 'contributor_note'
+                    return (
+                      <div
+                        key={note.id}
+                        className={`editor-feedback-history-item ${isContrib ? 'contributor' : 'reviewer'}`}
+                      >
+                        <span className="editor-feedback-note-author">
+                          {isContrib
+                            ? 'Contributor note'
+                            : note.author?.full_name || note.author?.email || 'Reviewer'}
+                        </span>
+                        <p className="editor-feedback-note-text">{note.note}</p>
                       </div>
-                      <p className="review-note-text">{note.note}</p>
-                    </div>
-                  ))}
+                    )
+                  })}
                 </div>
               )}
             </div>
@@ -904,288 +902,288 @@ export default function PostEditorPage() {
         </div>
       )}
 
-      {/* Editor Core Layout Grid */}
-      <form onSubmit={handleSubmit(onSaveDraft)} className="editor-grid-layout">
-        {/* Left main area */}
-        <div className="editor-main-panel">
-          {/* Card: Primary Details */}
-          <div className="editor-card">
-            <h2>Post Content</h2>
-
-            <div className="editor-form-group">
-              <label htmlFor="title">Title</label>
-              <input
-                id="title"
-                type="text"
-                {...register('title')}
-                placeholder="Enter post title..."
-                className={errors.title ? 'has-error' : ''}
-                disabled={isSubmitting}
-              />
-              {errors.title && (
-                <span className="validation-error-text">{errors.title.message}</span>
-              )}
+      {/* Main Post Editor Form */}
+      <form onSubmit={handleSubmit(onSaveDraft)} className="post-editor-form">
+        <div className="editor-grid-layout">
+          {/* ---------------- Left: Main Content Column ---------------- */}
+          <div className="editor-main-panel">
+            {/* Card: Title */}
+            <div className="editor-card">
+              <div className="editor-form-group">
+                <label htmlFor="title">
+                  Title <span className="required-star">*</span>
+                </label>
+                <input
+                  id="title"
+                  type="text"
+                  {...register('title')}
+                  placeholder="Enter a descriptive post title..."
+                  disabled={isSubmitting}
+                  className={errors.title ? 'has-error' : ''}
+                />
+                {errors.title && (
+                  <span className="validation-error-text">{errors.title.message}</span>
+                )}
+              </div>
             </div>
 
-            <div className="editor-form-group">
-              <label htmlFor="slug">URL Slug</label>
-              <div className="slug-input-wrapper">
+            {/* Card: Article Content */}
+            <div className="editor-card">
+              <div className="editor-form-group">
+                <label htmlFor="content">
+                  Article Content <span className="required-star">*</span>
+                </label>
+                <Controller
+                  name="content"
+                  control={control}
+                  render={({ field }) => (
+                    <RichTextEditor
+                      value={field.value}
+                      onChange={field.onChange}
+                    />
+                  )}
+                />
+                {errors.content && (
+                  <span className="validation-error-text">{errors.content.message}</span>
+                )}
+              </div>
+            </div>
+
+            {/* Card: Excerpt */}
+            <div className="editor-card">
+              <div className="editor-form-group">
+                <label htmlFor="excerpt">Article Excerpt</label>
+                <textarea
+                  id="excerpt"
+                  rows="3"
+                  {...register('excerpt')}
+                  placeholder="Summarize the core story in 1-2 sentences for card listings..."
+                  disabled={isSubmitting}
+                  className={errors.excerpt ? 'has-error' : ''}
+                ></textarea>
+                {errors.excerpt && (
+                  <span className="validation-error-text">{errors.excerpt.message}</span>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* ---------------- Right: Metadata & Settings Column ---------------- */}
+          <div className="editor-settings-sidebar">
+            {/* Card: Featured Image */}
+            <div className="editor-card">
+              <h2>Featured Image</h2>
+              <FeaturedImageUploader
+                url={watch('featured_image_url')}
+                onChangeUrl={(url) => setValue('featured_image_url', url, { shouldValidate: true })}
+                alt={watch('featured_image_alt')}
+                onChangeAlt={(alt) => setValue('featured_image_alt', alt, { shouldValidate: true })}
+                userId={user?.id}
+                errorUrl={errors.featured_image_url}
+                errorAlt={errors.featured_image_alt}
+              />
+            </div>
+
+            {/* Card: General Settings */}
+            <div className="editor-card">
+              <h2>Post Attributes</h2>
+
+              {/* URL Slug */}
+              <div className="editor-form-group">
+                <label htmlFor="slug">
+                  URL Slug <span className="required-star">*</span>
+                </label>
                 <input
                   id="slug"
                   type="text"
                   {...register('slug')}
-                  placeholder="url-safe-post-slug"
+                  placeholder="post-url-slug"
+                  disabled={isSubmitting}
                   className={errors.slug ? 'has-error' : ''}
-                  disabled={isSubmitting}
                 />
-                <button
-                  type="button"
-                  onClick={handleRegenerateSlug}
-                  className="edit-action-btn"
-                  title="Generate from title"
-                  disabled={isSubmitting}
-                >
-                  <Sparkles size={14} />
-                  <span>Auto</span>
-                </button>
-              </div>
-              <p className="uploader-hint" style={{ marginTop: '2px', textAlign: 'left' }}>
-                Used in the URL path. (e.g. <code>aasu-news-update</code>).
-              </p>
-              {errors.slug && (
-                <span className="validation-error-text">{errors.slug.message}</span>
-              )}
-            </div>
-
-            <div className="editor-form-group">
-              <label htmlFor="excerpt">Excerpt Summary</label>
-              <textarea
-                id="excerpt"
-                rows="3"
-                {...register('excerpt')}
-                placeholder="A short summary of this article to display in cards and list feeds..."
-                className={errors.excerpt ? 'has-error' : ''}
-                disabled={isSubmitting}
-              ></textarea>
-              {errors.excerpt && (
-                <span className="validation-error-text">{errors.excerpt.message}</span>
-              )}
-            </div>
-
-            {/* Rich Text Editor */}
-            <div className="editor-form-group">
-              <label htmlFor="content">Article Body Content</label>
-              <Controller
-                name="content"
-                control={control}
-                render={({ field }) => (
-                  <RichTextEditor value={field.value} onChange={field.onChange} />
+                {errors.slug && (
+                  <span className="validation-error-text">{errors.slug.message}</span>
                 )}
-              />
-              {errors.content && (
-                <span className="validation-error-text">{errors.content.message}</span>
-              )}
-            </div>
-          </div>
-        </div>
+              </div>
 
-        {/* Right side settings panel */}
-        <div className="editor-settings-sidebar">
-          {/* Card: Publishing Controls */}
-          <div className="editor-card">
-            <h2>Publishing Settings</h2>
+              {/* Post Type */}
+              <div className="editor-form-group">
+                <label htmlFor="type">Post Type</label>
+                <select id="type" {...register('type')} disabled={isSubmitting}>
+                  <option value="news">News Report</option>
+                  <option value="blog">Blog Insight</option>
+                </select>
+              </div>
 
-            <div className="editor-form-group">
-              <label htmlFor="type">Post Type</label>
-              <select id="type" {...register('type')} disabled={isSubmitting}>
-                <option value="news">News</option>
-                <option value="blog">Blog</option>
-              </select>
-              {errors.type && (
-                <span className="validation-error-text">{errors.type.message}</span>
-              )}
-            </div>
+              {/* Regional Focus */}
+              <div className="editor-form-group">
+                <label htmlFor="region">Regional Focus</label>
+                <select id="region" {...register('region')} disabled={isSubmitting}>
+                  <option value="">None / Regional</option>
+                  <option value="West Africa">West Africa</option>
+                  <option value="East Africa">East Africa</option>
+                  <option value="Central Africa">Central Africa</option>
+                  <option value="Southern Africa">Southern Africa</option>
+                  <option value="North Africa">North Africa</option>
+                  <option value="Diaspora">Diaspora</option>
+                </select>
+              </div>
 
-            <div className="editor-form-group">
-              <label htmlFor="region">Regional Focus</label>
-              <select id="region" {...register('region')} disabled={isSubmitting}>
-                <option value="">None / Regional</option>
-                <option value="North Africa">North Africa</option>
-                <option value="West Africa">West Africa</option>
-                <option value="East Africa">East Africa</option>
-                <option value="Central Africa">Central Africa</option>
-                <option value="Southern Africa">Southern Africa</option>
-                <option value="Diaspora">Diaspora</option>
-                <option value="International">International</option>
-              </select>
-            </div>
-
-            <div className="editor-form-group">
-              <label htmlFor="theme">Thematic Focus</label>
-              <input
-                id="theme"
-                type="text"
-                {...register('theme')}
-                placeholder="e.g. Education, Advocacy"
-                disabled={isSubmitting}
-              />
-            </div>
-          </div>
-
-          {/* Card: Featured Image */}
-          <div className="editor-card">
-            <h2>Featured Image</h2>
-            <Controller
-              name="featured_image_url"
-              control={control}
-              render={({ field }) => (
-                <FeaturedImageUploader
-                  url={field.value}
-                  onChangeUrl={field.onChange}
-                  alt={watch('featured_image_alt')}
-                  onChangeAlt={(val) => setValue('featured_image_alt', val, { shouldValidate: true, shouldDirty: true })}
-                  userId={user.id}
-                  errorUrl={errors.featured_image_url}
-                  errorAlt={errors.featured_image_alt}
-                />
-              )}
-            />
-          </div>
-
-          {/* Card: Categories */}
-          <div className="editor-card">
-            <h2>Categories</h2>
-            <div className="categories-checklist-container">
-              {categories.length === 0 ? (
-                <span className="uploader-hint">No categories registered.</span>
-              ) : (
-                categories.map((cat) => (
-                  <label key={cat.id} className="category-check-item">
+              {/* Thematic Focus */}
+              <div className="editor-form-group">
+                <label htmlFor="theme">Thematic Focus</label>
+                <Controller
+                  name="theme"
+                  control={control}
+                  render={({ field }) => (
                     <input
-                      type="checkbox"
-                      checked={selectedCategoryIds.includes(cat.id)}
-                      onChange={() => handleCategoryToggle(cat.id)}
+                      id="theme"
+                      type="text"
+                      {...field}
+                      placeholder="e.g. Student Leadership, Education Policy"
                       disabled={isSubmitting}
                     />
-                    <span>{cat.name}</span>
-                  </label>
-                ))
-              )}
-            </div>
-          </div>
-
-          {/* Card: Homepage Controls (Admin Only) */}
-          {isAdmin && (
-            <div className="editor-card">
-              <h2>Homepage Controls</h2>
-
-              <div className="editor-form-group">
-                <label htmlFor="hero_position">Hero Placement</label>
-                <select id="hero_position" {...register('hero_position')} disabled={isSubmitting}>
-                  <option value="none">None</option>
-                  <option value="primary">Primary Hero</option>
-                  <option value="secondary">Secondary Hero</option>
-                </select>
-                <p className="uploader-hint" style={{ marginTop: '2px' }}>
-                  Only applies if status is Published.
-                </p>
-              </div>
-
-              <div className="editor-form-group">
-                <label htmlFor="featured_until">Featured Until</label>
-                <input
-                  id="featured_until"
-                  type="date"
-                  {...register('featured_until')}
-                  disabled={isSubmitting}
+                  )}
                 />
               </div>
             </div>
-          )}
 
-          {/* Card: SEO Metadata */}
-          <div className="editor-card">
-            <h2>SEO Metadata</h2>
-
-            <div className="editor-form-group">
-              <label htmlFor="seo_title">SEO Title</label>
-              <input
-                id="seo_title"
-                type="text"
-                {...register('seo_title')}
-                placeholder="Fallback: title"
-                disabled={isSubmitting}
-              />
+            {/* Card: Categories */}
+            <div className="editor-card">
+              <h2>Categories</h2>
+              <div className="categories-checklist-container">
+                {categories.length === 0 ? (
+                  <span className="uploader-hint">No categories registered.</span>
+                ) : (
+                  categories.map((cat) => (
+                    <label key={cat.id} className="category-check-item">
+                      <input
+                        type="checkbox"
+                        checked={selectedCategoryIds.includes(cat.id)}
+                        onChange={() => handleCategoryToggle(cat.id)}
+                        disabled={isSubmitting}
+                      />
+                      <span>{cat.name}</span>
+                    </label>
+                  ))
+                )}
+              </div>
             </div>
 
-            <div className="editor-form-group">
-              <label htmlFor="seo_description">SEO Description</label>
-              <textarea
-                id="seo_description"
-                rows="3"
-                {...register('seo_description')}
-                placeholder="Fallback: excerpt"
-                disabled={isSubmitting}
-              ></textarea>
+            {/* Card: Homepage Controls (Super Admin & Comms Admin Only) */}
+            {canManageHero && (
+              <div className="editor-card">
+                <h2>Homepage Controls</h2>
+
+                <div className="editor-form-group">
+                  <label htmlFor="hero_position">Hero Placement</label>
+                  <select id="hero_position" {...register('hero_position')} disabled={isSubmitting}>
+                    <option value="none">None</option>
+                    <option value="primary">Primary Hero</option>
+                    <option value="secondary">Secondary Hero</option>
+                  </select>
+                  <p className="uploader-hint" style={{ marginTop: '2px' }}>
+                    Only applies if status is Published.
+                  </p>
+                </div>
+
+                <div className="editor-form-group">
+                  <label htmlFor="featured_until">Featured Until</label>
+                  <input
+                    id="featured_until"
+                    type="date"
+                    {...register('featured_until')}
+                    disabled={isSubmitting}
+                  />
+                </div>
+              </div>
+            )}
+
+            {/* Card: SEO Metadata */}
+            <div className="editor-card">
+              <h2>SEO Metadata</h2>
+
+              <div className="editor-form-group">
+                <label htmlFor="seo_title">SEO Title</label>
+                <input
+                  id="seo_title"
+                  type="text"
+                  {...register('seo_title')}
+                  placeholder="Fallback: title"
+                  disabled={isSubmitting}
+                />
+              </div>
+
+              <div className="editor-form-group">
+                <label htmlFor="seo_description">SEO Description</label>
+                <textarea
+                  id="seo_description"
+                  rows="3"
+                  {...register('seo_description')}
+                  placeholder="Fallback: excerpt"
+                  disabled={isSubmitting}
+                ></textarea>
+              </div>
             </div>
           </div>
-        </div>
 
-        {/* Action Panel Footer across bottom */}
-        <div className="editor-card" style={{ gridColumn: '1 / -1', padding: '16px 24px' }}>
-          <div className="editor-action-footer">
-            <div className="action-left">
-              {/* Save Draft */}
-              <button
-                type="submit"
-                disabled={isSubmitting}
-                className="editor-btn save-draft"
-              >
-                <Save size={16} />
-                <span>Save Draft</span>
-              </button>
+          {/* Action Panel Footer across bottom */}
+          <div className="editor-card" style={{ gridColumn: '1 / -1', padding: '16px 24px' }}>
+            <div className="editor-action-footer">
+              <div className="action-left">
+                {/* Save Draft */}
+                <button
+                  type="submit"
+                  disabled={isSubmitting}
+                  className="editor-btn save-draft"
+                >
+                  <Save size={16} />
+                  <span>Save Draft</span>
+                </button>
 
-              {/* Submit for Review — contributor creation uses two-step draft insert + in_review update */}
-              <button
-                type="button"
-                onClick={handleSubmit(onSubmitReview)}
-                disabled={isSubmitting}
-                className="editor-btn submit-review"
-              >
-                <FileCheck size={16} />
-                <span>Submit for Review</span>
-              </button>
+                {/* Submit for Review (Contributor Only) */}
+                {isContributor && (
+                  <button
+                    type="button"
+                    onClick={handleSubmit(onSubmitReview)}
+                    disabled={isSubmitting}
+                    className="editor-btn submit-review"
+                  >
+                    <FileCheck size={16} />
+                    <span>Submit for Review</span>
+                  </button>
+                )}
 
-              {/* Publish (Admin Only) */}
-              {isAdmin && (
+                {/* Publish Now (Super Admin, Comms Admin, or Supervisor) */}
+                {canPublishDirectly && (
+                  <button
+                    type="button"
+                    onClick={handleSubmit(onPublish)}
+                    disabled={isSubmitting}
+                    className="editor-btn publish"
+                  >
+                    <CheckCircle2 size={16} />
+                    <span>{isEditMode && originalPost?.status === 'published' ? 'Publish Changes' : 'Publish Now'}</span>
+                  </button>
+                )}
+              </div>
+
+              <div>
                 <button
                   type="button"
-                  onClick={handleSubmit(onPublish)}
+                  onClick={handleCancelClick}
+                  className="edit-action-btn"
                   disabled={isSubmitting}
-                  className="editor-btn publish"
                 >
-                  <CheckCircle2 size={16} />
-                  <span>Publish Now</span>
+                  Cancel
                 </button>
-              )}
-            </div>
-
-            <div>
-              <button
-                type="button"
-                onClick={handleCancelClick}
-                className="edit-action-btn"
-                disabled={isSubmitting}
-              >
-                Cancel
-              </button>
+              </div>
             </div>
           </div>
         </div>
       </form>
 
-      {/* Contributor submission confirmation modal (optional note to reviewer).
-          Failures keep it open; saveStatus is surfaced inside as the notice. */}
+      {/* Contributor submission confirmation modal */}
       {pendingSubmission && (
         <SubmissionModal
           note={submissionNote}
